@@ -6,7 +6,7 @@
  */
 'use strict';
 
-const APP_VERSION = '1.4.0';
+const APP_VERSION = '1.5.0';
 // The record kinds kept on this device. QuickBooks, bank imports and the rest stay on the Mac.
 // planSheet and planMark are the plan reader's scales and measurements (plans.js); the Mac app
 // leaves kinds it doesn't know alone.
@@ -291,7 +291,7 @@ const idb = (() => {
 // ---------------------------------------------------------------------------
 // App state
 
-const freshMeta = () => ({ cursor: null, lastFull: 0, lastSync: 0, uploads: [], storageDeletes: [], kinds: KINDS_KEY, projectOps: {} });
+const freshMeta = () => ({ cursor: null, lastFull: 0, lastSync: 0, uploads: [], storageDeletes: [], kinds: KINDS_KEY, recordOps: {} });
 const S = {
   config: null, // { url, key }
   session: null, // { accessToken, refreshToken, expiresAt, userID, email }
@@ -389,30 +389,31 @@ async function deleteRecord(kind, id) {
 }
 
 /**
- * Changes to a project record, which the Mac edits too (a job's selections live inside it).
- * Each change is kept as a small step (PROJECT_OPS, from budget.js) until it has reached
- * Supabase. If the project changed on the Mac in the meantime, the steps are made again on the
- * Mac's newer copy before it's sent (applyRemote), so neither side's edit is lost, with signal
- * or without. Returns the project as saved here.
+ * Changes to records the Mac edits too: a project (its selections and draws live inside it) or
+ * a bill (its payments' lien waivers). Each change is kept as a small step (RECORD_OPS, from
+ * budget.js and money.js) until it has reached Supabase. If the record changed on the Mac in the
+ * meantime, the steps are made again on the Mac's newer copy before it's sent (applyRemote), so
+ * neither side's edit is lost, with signal or without. Returns the record as saved here.
  */
-const PROJECT_OPS = {};
-function applyProjectOps(p, ops) {
-  for (const op of ops) PROJECT_OPS[op.op]?.(p, op);
-  return p;
+const RECORD_OPS = {};
+function applyRecordOps(data, ops) {
+  for (const op of ops) RECORD_OPS[op.op]?.(data, op);
+  return data;
 }
-async function editProject(projectID, ops) {
-  const current = project(projectID);
-  if (!current) { toast('This project was deleted on the Mac.'); return null; }
-  const k = key(projectID);
-  if (!S.meta.projectOps[k]) S.meta.projectOps[k] = { base: Number(current.updatedAt) || 0, ops: [] };
-  S.meta.projectOps[k].ops.push(...clone(ops));
-  const p = applyProjectOps(clone(current), ops);
-  await saveRecord('project', p, { upload: true });
+async function editRecord(kind, id, ops) {
+  const current = get(id);
+  if (!current || S.docs.get(key(id))?.kind !== kind) { toast(kind === 'project' ? 'This project was deleted on the Mac.' : 'This was deleted on the Mac.'); return null; }
+  const k = key(id);
+  if (!S.meta.recordOps[k]) S.meta.recordOps[k] = { kind, base: Number(current.updatedAt) || 0, ops: [] };
+  S.meta.recordOps[k].ops.push(...clone(ops));
+  const data = applyRecordOps(clone(current), ops);
+  await saveRecord(kind, data, { upload: true });
   clearTimeout(syncTimer);
   syncNow();
   renderSoon();
-  return p;
+  return data;
 }
+const editProject = (projectID, ops) => editRecord('project', projectID, ops);
 
 // ---------------------------------------------------------------------------
 // Supabase
@@ -575,12 +576,12 @@ async function applyRemote(rows) {
     const data = r.data && typeof r.data === 'object' ? r.data : {};
     const remoteStamp = Number(data.updatedAt) || 0;
     const local = S.docs.get(id);
-    const pending = r.kind === 'project' && !r.deleted && S.meta.projectOps?.[id];
+    const pending = !r.deleted && S.meta.recordOps?.[id];
     if (pending && local && S.dirty.has(id)) {
       const localStamp = Number(local.data?.updatedAt) || 0;
       // Changed on the Mac since the copy these edits were made on: make them again on its copy.
       if (Math.abs(remoteStamp - pending.base) > 0.001 && Math.abs(remoteStamp - localStamp) > 0.001) {
-        const rebased = applyProjectOps(clone(data), pending.ops);
+        const rebased = applyRecordOps(clone(data), pending.ops);
         rebased.updatedAt = Math.max(stamp(), remoteStamp + 0.001);
         pending.base = remoteStamp;
         const row = { id, kind: r.kind, deleted: false, data: rebased };
@@ -690,7 +691,7 @@ async function pushChanges(token) {
       // Clear only what went up; anything edited meanwhile goes next time.
       if (row && row.data.updatedAt === s.stamp) {
         S.dirty.delete(s.id);
-        delete S.meta.projectOps[s.id]; // its edits are in Supabase now
+        delete S.meta.recordOps[s.id]; // its edits are in Supabase now
         if (row.deleted) { S.docs.delete(s.id); dels.push(s.id); }
       }
     }
@@ -786,7 +787,7 @@ function photoName(date) {
 }
 
 /** Adds files as the Mac's VaultDocuments: saved here at once, uploaded on the next sync. */
-async function addFiles(fileList, { projectID = null, category = 'progressPhoto', recordID = null, needsReview = false, contactID = null } = {}) {
+async function addFiles(fileList, { projectID = null, category = 'progressPhoto', recordID = null, needsReview = false, contactID = null, transactionID = null, drawID = null, ids = null } = {}) {
   const files = [...fileList];
   if (!files.length) return 0;
   toast(files.length === 1 ? 'Saving…' : `Saving ${files.length} files…`);
@@ -815,6 +816,9 @@ async function addFiles(fileList, { projectID = null, category = 'progressPhoto'
     if (projectID) doc.projectID = projectID;
     if (recordID) doc.recordID = recordID;
     if (contactID) doc.contactID = contactID;
+    if (transactionID) doc.transactionID = transactionID;
+    if (drawID) doc.drawID = drawID;
+    if (ids) ids.push(doc.id);
     const id = key(doc.id);
     await idb.set('blobs', id, { blob, contentType: contentType(ext) });
     S.meta.uploads.push(id);
@@ -1195,15 +1199,19 @@ const TABS = [
   ['projects', 'Projects', 'folder', 'var(--forest)'],
   ['schedule', 'Schedule', 'schedule', 'var(--gold)'],
   ['calendar', 'Calendar', 'calendar', 'var(--clay)'],
+  ['books', 'Books', 'bookClosed', 'var(--spruce)'],
   ['contacts', 'Contacts', 'people', 'var(--walnut)'],
-  ['settings', 'Settings', 'settings', 'var(--stone)'],
+  // On a phone, Settings is the gear on Projects; the sidebar lists it.
+  ['settings', 'Settings', 'settings', 'var(--stone)', true],
 ];
+const isWide = () => matchMedia('(min-width: 900px)').matches;
+matchMedia('(min-width: 900px)').addEventListener?.('change', () => renderSoon());
 function renderTabs(active) {
   const nav = $('#tabs');
   if (!S.session) { nav.classList.add('hidden'); return; }
   nav.classList.remove('hidden');
   nav.innerHTML = `<div class="brand"><img src="icon-180.png" alt="">Eagle Creek</div>` +
-    TABS.map(([r, label, ic, tint]) => `<a href="#/${r}" class="${active === r ? 'on' : ''}" style="--tint:${tint}" ${active === r ? 'aria-current="page"' : ''}>${icon(ic)}<span>${label}</span></a>`).join('');
+    TABS.map(([r, label, ic, tint, wideOnly]) => `<a href="#/${r}" class="${active === r ? 'on' : ''}${wideOnly ? ' wide-only' : ''}" style="--tint:${tint}" ${active === r ? 'aria-current="page"' : ''}>${icon(ic)}<span>${label}</span></a>`).join('');
 }
 
 function render() {
@@ -1228,6 +1236,7 @@ function render() {
       case 'contacts': html = viewContacts(); break;
       case 'contact': html = viewContact(r.a); tab = 'contacts'; break;
       case 'settings': html = viewSettings(); break;
+      case 'books': html = viewBooks(r.a || 'overview', r.b); break;
       default: html = viewProjects(); tab = 'projects';
     }
   } catch (e) {
@@ -1259,8 +1268,8 @@ function card(title, body, { action = '', flush = true } = {}) {
   return `<section class="card ${flush ? 'flush' : ''}"><div class="card-head"><h2>${esc(title)}</h2>${action}</div>${body}</section>`;
 }
 const cardLink = (label, href) => `<a class="btn link" href="${esc(href)}">${esc(label)}</a>`;
-function tile(title, value, detail = '', { accent = 'var(--gold)', progress = null } = {}) {
-  return `<div class="tile" style="--a:${accent}"><div class="tt">${esc(title)}</div><div class="tv">${esc(value)}</div>${progress != null ? `<div class="progress"><i style="width:${Math.round(progress * 100)}%"></i></div>` : ''}${detail ? `<div class="td">${esc(detail)}</div>` : ''}</div>`;
+function tile(title, value, detail = '', { accent = 'var(--gold)', progress = null, tint = '' } = {}) {
+  return `<div class="tile" style="--a:${accent}"><div class="tt">${esc(title)}</div><div class="tv"${tint ? ` style="color:${tint}"` : ''}>${esc(value)}</div>${progress != null ? `<div class="progress"><i style="width:${Math.round(progress * 100)}%"></i></div>` : ''}${detail ? `<div class="td">${esc(detail)}</div>` : ''}</div>`;
 }
 function emptyState(ic, title, text, action = '') {
   return `<div class="empty">${icon(ic)}<div class="et">${esc(title)}</div>${text ? `<div class="ed">${esc(text)}</div>` : ''}${action}</div>`;
@@ -1337,7 +1346,7 @@ function projectRow(p) {
 }
 
 function viewProjects() {
-  setHeader({ title: 'Projects', actions: `<button class="icon-btn" data-act="receipt" aria-label="Snap a receipt" title="Snap a receipt">${icon('receipt')}</button>` });
+  setHeader({ title: 'Projects', actions: `<button class="icon-btn" data-act="receipt" aria-label="Snap a receipt" title="Snap a receipt">${icon('receipt')}</button>${isWide() ? '' : `<a class="icon-btn" href="#/settings" aria-label="Settings" title="Settings">${icon('settings')}</a>`}` });
   let html = '';
   if (S.syncError) html += banner(S.syncError);
   html += `<div class="search">${icon('search')}<input class="input" id="project-search" type="search" placeholder="Find a project" value="${esc(S.ui.search)}" autocomplete="off"></div>`;
@@ -1870,7 +1879,7 @@ function viewCalendar() {
 // ----- Settings
 
 function viewSettings() {
-  setHeader({ title: 'Settings' });
+  setHeader({ title: 'Settings', back: isWide() ? null : '#/projects' });
   const pending = S.dirty.size + S.meta.uploads.length;
   const theme = themeChoice();
   let html = '';
@@ -2108,6 +2117,7 @@ function viewerList(name) {
   const [kind, id] = name.split(':');
   if (kind === 'photos') return projectPhotoList(id).map((f) => key(f.id));
   if (kind === 'log') return filesFor('recordID', id).sort((a, b) => (a.addedAt || 0) - (b.addedAt || 0)).map((f) => key(f.id));
+  if (kind === 'draw') return all('file').filter((f) => sameId(f.drawID, id)).sort((a, b) => (b.addedAt || 0) - (a.addedAt || 0)).map((f) => key(f.id));
   return [];
 }
 const canDelete = (f) => PHOTO_CATEGORIES.has(f.category) && !f.transactionID && !f.drawID;
@@ -2607,6 +2617,8 @@ async function boot() {
       S.dirty = new Set(meta.dirty || []);
       delete meta.dirty;
       S.meta = { ...freshMeta(), ...meta };
+      // 1.4.0 kept project edits as projectOps.
+      if (meta.projectOps) { for (const [k, v] of Object.entries(meta.projectOps)) S.meta.recordOps[k] = { kind: 'project', ...v }; delete S.meta.projectOps; }
       // This version keeps more kinds of records: read everything once to pick up the older ones.
       if (S.meta.kinds !== KINDS_KEY) { S.meta.cursor = null; S.meta.lastFull = 0; S.meta.kinds = KINDS_KEY; }
     }

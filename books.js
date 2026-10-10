@@ -602,3 +602,264 @@ function commitmentTotals(c) {
   return t0;
 }
 const commitmentIsCommitted = (c) => ['issued', 'signed', 'complete'].includes(c.status);
+
+// ----- The deal's numbers (Engine/DealAnalysis.swift: the parts the money pages use)
+
+const DAYS_PER_MONTH = 30.4375;
+const median = (v) => { if (!v.length) return 0; const s = v.slice().sort((a, b) => a - b); const m = Math.floor(s.length / 2); return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2; };
+/** The after-repair value the deal uses (manual, the comps, or a new build's units). */
+function dealARV(p) {
+  const sale = p.sale || {};
+  let arv = Number(sale.manualARV) || 0;
+  const source = sale.arvSource || 'manual';
+  if (source === 'units') {
+    const total = (p.units || []).reduce((s, u) => s + (((u.status === 'sold' || u.status === 'underContract') && u.salePrice > 0) ? u.salePrice : (Number(u.projectedPrice) || 0)), 0);
+    if (total > 0) arv = total;
+  } else {
+    const used = (p.comps || []).filter((c) => c.include !== false && (Number(c.salePrice) || 0) > 0);
+    if (used.length && source !== 'manual') {
+      const prices = used.map((c) => (Number(c.salePrice) || 0) + (Number(c.adjustment) || 0));
+      const ppsf = used.filter((c) => c.sqft > 0).map((c) => ((Number(c.salePrice) || 0) + (Number(c.adjustment) || 0)) / c.sqft);
+      const area = livingArea(p);
+      const avgPPSF = ppsf.length ? ppsf.reduce((a, b) => a + b, 0) / ppsf.length : 0;
+      const candidates = {
+        compsAvgPPSF: area > 0 ? avgPPSF * area : 0,
+        compsMedianPPSF: area > 0 ? median(ppsf) * area : 0,
+        compsAvgPrice: prices.reduce((a, b) => a + b, 0) / prices.length,
+      };
+      if (candidates[source] > 0) arv = candidates[source];
+    }
+  }
+  return Math.max(0, arv);
+}
+
+/** Loan, draw schedule, holding and selling numbers, as DealAnalysis works them out. */
+function dealNumbers(p) {
+  const cache = fresh().cache;
+  const ck = `deal:${key(p.id)}`;
+  if (cache.has(ck)) return cache.get(ck);
+  const loan = { purchaseFinancedPct: 90, rehabFinancedPct: 100, financeContingency: true, maxARVPct: 70, maxLTCPct: 90, useRequestedAmount: false, requestedAmount: 0, ratePct: 12, pointsPct: 2, lenderFees: 0, drawFee: 0, interestOnFullBalance: false, ...(p.loan || {}) };
+  const holding = { rehabMonths: 3, saleMonths: 2, propertyTaxAnnual: 0, insuranceAnnual: 0, utilitiesMonthly: 0, otherMonthly: 0, ...(p.holding || {}) };
+  const sale = { commissionPct: 6, sellerClosingPct: 1.5, concessions: 0, otherSellingCosts: 0, ...(p.sale || {}) };
+  const acq = p.acquisition || {};
+  const isNewBuild = p.kind === 'newBuild';
+  const d = { arv: dealARV(p), purchasePrice: Number(acq.purchasePrice) || 0, closingCosts: Number(acq.closingCosts) || 0, acquisitionFee: Number(acq.acquisitionFee) || 0 };
+  const t = budgetTotals(p);
+  Object.assign(d, { rehabBase: t.base, contingency: t.contingency, rehabTotal: t.total });
+  const rehabEligible = loan.financeContingency ? t.total : t.base;
+  const purchaseComponent = d.purchasePrice * loan.purchaseFinancedPct / 100;
+  const rehabComponent = rehabEligible * loan.rehabFinancedPct / 100;
+  const leverage = purchaseComponent + rehabComponent;
+  const arvCap = d.arv > 0 && loan.maxARVPct > 0 ? d.arv * loan.maxARVPct / 100 : null;
+  const basis = d.purchasePrice + t.total;
+  const costCap = basis > 0 && loan.maxLTCPct > 0 ? basis * loan.maxLTCPct / 100 : null;
+  if (loan.useRequestedAmount && loan.requestedAmount > 0) d.loanAmount = loan.requestedAmount;
+  else {
+    let amount = leverage;
+    if (arvCap != null && arvCap < amount) amount = arvCap;
+    if (costCap != null && costCap < amount) amount = costCap;
+    d.loanAmount = Math.max(0, amount);
+  }
+  d.holdback = Math.min(Math.min(rehabComponent, d.loanAmount), d.loanAmount);
+  d.initialAdvance = Math.max(0, d.loanAmount - d.holdback);
+  const preMonths = isNewBuild ? Math.max(0, p.development?.predevelopmentMonths ?? 3) : 0;
+  const buildMonths = Math.max(0, holding.rehabMonths);
+  const holdMonths = Math.max(0, preMonths + holding.rehabMonths + holding.saleMonths);
+  // Draw schedule: each draw's budget lines and its share of the contingency and holdback.
+  const draws = p.draws || [];
+  const drawIDs = new Set(draws.map((x) => key(x.id)));
+  const byDraw = new Map();
+  const unassigned = [];
+  for (const b of p.budget || []) {
+    if (b.drawID && drawIDs.has(key(b.drawID))) { const k = key(b.drawID); if (!byDraw.has(k)) byDraw.set(k, []); byDraw.get(k).push(b); } else unassigned.push(b);
+  }
+  const unassignedSum = unassigned.reduce((s, b) => s + budgetItemTotal(b), 0) + t.estimate;
+  const sums = draws.map((x) => (byDraw.get(key(x.id)) || []).reduce((s, b) => s + budgetItemTotal(b), 0));
+  const allSum = sums.reduce((a, b) => a + b, 0) + unassignedSum;
+  const drawCont = draws.map(() => 0);
+  let unassignedCont = 0;
+  if (t.contingency > 0) {
+    if (!draws.length) unassignedCont = t.contingency;
+    else if (p.contingencyAllocation === 'finalDraw' || allSum <= 0) drawCont[drawCont.length - 1] = t.contingency;
+    else { sums.forEach((s, i) => { drawCont[i] = t.contingency * s / allSum; }); unassignedCont = t.contingency * unassignedSum / allSum; }
+  }
+  const eligible = sums.map((s, i) => s + (loan.financeContingency ? drawCont[i] : 0));
+  const eligibleUnassigned = unassignedSum + (loan.financeContingency ? unassignedCont : 0);
+  const eligibleSum = eligible.reduce((a, b) => a + b, 0) + eligibleUnassigned;
+  let cumulative = 0;
+  d.draws = draws.map((x, i) => {
+    const financed = eligibleSum > 0 ? d.holdback * eligible[i] / eligibleSum : 0;
+    cumulative += financed;
+    const name = (x.name || '').trim();
+    return {
+      id: x.id, number: i + 1, name, title: name ? `Draw ${i + 1} — ${name}` : `Draw ${i + 1}`, milestone: x.milestone || '', items: byDraw.get(key(x.id)) || [],
+      itemsTotal: sums[i], contingency: drawCont[i], total: sums[i] + drawCont[i], financed, cumulativeFinanced: cumulative,
+      weeksAfterClose: x.weeksAfterClose ?? 4, targetDate: acq.closingDate != null ? addDays(fromSec(acq.closingDate), Math.round((x.weeksAfterClose ?? 4) * 7)) : null,
+      status: x.status || 'planned', requestedAmount: Number(x.requestedAmount) || 0, requestedDate: x.requestedDate ?? null,
+      fundedAmount: Number(x.fundedAmount) || 0, fundedDate: x.fundedDate ?? null, inspectionNotes: x.inspectionNotes || '',
+      requestAmount: (Number(x.requestedAmount) || 0) > 0 ? Number(x.requestedAmount) : financed,
+    };
+  });
+  d.unassignedItems = unassigned;
+  d.unscheduledFinanced = eligibleSum > 0 ? d.holdback * eligibleUnassigned / eligibleSum : 0;
+  d.fundedToDate = draws.filter((x) => x.status === 'funded').reduce((s, x) => s + (Number(x.fundedAmount) || 0), 0);
+  d.remainingHoldback = Math.max(0, d.holdback - d.fundedToDate);
+  // Financing, holding and selling costs.
+  const rate = loan.ratePct / 100 / 12;
+  if (loan.interestOnFullBalance) d.interest = d.loanAmount * rate * holdMonths;
+  else {
+    let total = d.initialAdvance * rate * holdMonths;
+    for (const line of d.draws) total += line.financed * rate * Math.max(0, holdMonths - line.weeksAfterClose * 7 / DAYS_PER_MONTH);
+    total += d.unscheduledFinanced * rate * Math.max(0, holdMonths - (preMonths + buildMonths / 2));
+    d.interest = total;
+  }
+  d.points = d.loanAmount * loan.pointsPct / 100;
+  d.lenderFees = Number(loan.lenderFees) || 0;
+  d.drawFees = (Number(loan.drawFee) || 0) * d.draws.filter((x) => x.total > 0).length;
+  d.holdingTotal = holding.propertyTaxAnnual / 12 * holdMonths + holding.insuranceAnnual / 12 * holdMonths + holding.utilitiesMonthly * holdMonths + holding.otherMonthly * holdMonths;
+  d.sellingTotal = d.arv * sale.commissionPct / 100 + d.arv * sale.sellerClosingPct / 100 + (Number(sale.concessions) || 0) + (Number(sale.otherSellingCosts) || 0);
+  cache.set(ck, d);
+  return d;
+}
+
+// ----- A project's money (JobCostReport, DrawReconciliation, ProjectFinancials, ClientJobFinancials)
+
+/** Estimate vs actual by cost group, and costs and income by account. */
+function projectMoney(p) {
+  const cache = fresh().cache;
+  const ck = `money:${key(p.id)}`;
+  if (cache.has(ck)) return cache.get(ck);
+  const d = booksData();
+  const costs = new Map(), income = new Map(), byGroup = new Map();
+  for (const posting of d.postings) {
+    if (!sameId(posting.projectID, p.id)) continue;
+    const a = d.account(posting.accountID);
+    if (!a || isBalanceSheetType(a.type)) continue;
+    const s = typeSection(a.type);
+    const k = key(posting.accountID);
+    if (s === 'income' || s === 'otherIncome') income.set(k, (income.get(k) || 0) - posting.amount);
+    else { costs.set(k, (costs.get(k) || 0) + posting.amount); const g = a.costGroup || 'other'; byGroup.set(g, (byGroup.get(g) || 0) + posting.amount); }
+  }
+  const amounts = (m) => [...m].filter(([, v]) => Math.abs(v) >= 0.005).map(([id, v]) => ({ id, name: d.accountName(id), amount: money(v) })).sort((a, b) => d.rank(a.id) - d.rank(b.id));
+  const deal = dealNumbers(p);
+  const estimates = {
+    acquisition: deal.purchasePrice + deal.closingCosts + deal.acquisitionFee, rehab: deal.rehabTotal,
+    financing: deal.points + deal.lenderFees + deal.drawFees + deal.interest, holding: deal.holdingTotal, selling: deal.sellingTotal, other: 0,
+  };
+  const groups = Object.keys(COST_GROUPS).map((g) => ({ id: g, label: COST_GROUPS[g], estimate: money(estimates[g] || 0), actual: money(byGroup.get(g) || 0) }))
+    .map((g) => ({ ...g, variance: money(g.estimate - g.actual) }));
+  const r = { costsByAccount: amounts(costs), incomeByAccount: amounts(income), groups };
+  r.totalCosts = money(r.costsByAccount.reduce((s, x) => s + x.amount, 0));
+  r.income = money(r.incomeByAccount.reduce((s, x) => s + x.amount, 0));
+  r.estimateTotal = money(groups.reduce((s, g) => s + g.estimate, 0));
+  r.actualTotal = money(groups.reduce((s, g) => s + g.actual, 0));
+  // Draws received against the work billed and paid.
+  const pcosts = projectCosts(p.id);
+  const itemDraw = new Map((p.budget || []).map((b) => [key(b.id), b.drawID || null]));
+  const ids = new Set((p.budget || []).map((b) => key(b.id)));
+  let paidTotal = 0, billedTotal = 0;
+  for (const t of pcosts) {
+    const ratio = paidRatio(t);
+    for (const l of t.lines || []) {
+      const linked = !!l.budgetItemID && ids.has(key(l.budgetItemID));
+      if (!linked && d.account(l.accountID)?.costGroup !== 'rehab') continue;
+      billedTotal += Number(l.amount) || 0;
+      paidTotal += (Number(l.amount) || 0) * ratio;
+    }
+  }
+  r.rehabPaid = money(paidTotal);
+  r.drawLines = deal.draws.map((line) => {
+    const deposits = d.transactions.filter((t) => t.type === 'deposit' && !t.isVoid && sameId(t.drawID, line.id) && sameId(t.projectID, p.id));
+    let gross = deposits.reduce((s, t) => s + txnTotal(t), 0);
+    let fees = deposits.reduce((s, t) => s + (Number(t.feesWithheld) || 0), 0);
+    let date = deposits.length ? Math.max(...deposits.map((t) => t.date || 0)) : null;
+    const recorded = deposits.length > 0;
+    if (!recorded && (line.status === 'funded' || line.fundedAmount > 0)) { gross = line.fundedAmount; fees = 0; date = line.fundedDate; }
+    let billed = 0, paid = 0;
+    for (const t of pcosts) {
+      const ratio = paidRatio(t);
+      for (const l of t.lines || []) {
+        let lineDraw = t.drawID || null;
+        if (l.budgetItemID && itemDraw.has(key(l.budgetItemID))) lineDraw = itemDraw.get(key(l.budgetItemID)) || t.drawID || null;
+        if (!sameId(lineDraw, line.id)) continue;
+        billed += Number(l.amount) || 0;
+        paid += (Number(l.amount) || 0) * ratio;
+      }
+    }
+    return { id: line.id, number: line.number, scheduled: money(line.financed), requested: money(line.requestAmount), fundedGross: money(gross), fees: money(fees), net: money(gross - fees), receivedDate: date, recordedInBooks: recorded, deposits, workBilled: money(billed), workPaid: money(paid), isFunded: gross > 0.005 };
+  });
+  r.drawsReceived = money(r.drawLines.reduce((s, x) => s + x.fundedGross, 0));
+  r.drawFees = money(r.drawLines.reduce((s, x) => s + x.fees, 0));
+  r.drawsNet = money(r.drawsReceived - r.drawFees);
+  r.drawCashPosition = money(r.drawsNet - r.rehabPaid);
+  r.hasUnrecordedFunding = r.drawLines.some((x) => x.isFunded && !x.recordedInBooks);
+  // Open bills and invoices, waivers and the loan.
+  r.openBills = 0; r.openBillCount = 0; r.overdueBillCount = 0; r.openInvoices = 0;
+  for (const t of d.transactions) {
+    if (!sameId(t.projectID, p.id) || t.isVoid) continue;
+    if (t.type === 'bill' && txnOpen(t)) { r.openBills += txnBalance(t); r.openBillCount += 1; if (txnOverdue(t)) r.overdueBillCount += 1; }
+    if (t.type === 'invoice' && txnOpen(t)) r.openInvoices += txnBalance(t);
+  }
+  r.openBills = money(r.openBills); r.openInvoices = money(r.openInvoices);
+  const waivers = lienWaiverReport(p.id);
+  r.missingWaivers = waivers.missing.length + waivers.awaiting.length;
+  r.missingWaiverAmount = money(waivers.missingAmount + waivers.awaiting.reduce((s, i) => s + i.amount, 0));
+  const loans = new Set(d.accounts.filter((a) => a.type === 'loan').map((a) => key(a.id)));
+  r.loanBalance = money(-d.postings.filter((x) => sameId(x.projectID, p.id) && loans.has(key(x.accountID))).reduce((s, x) => s + x.amount, 0));
+  cache.set(ck, r);
+  return r;
+}
+
+/** A client job's contract, cost, billing and profit (ClientJobFinancials). */
+function estimatePrice(est, line) { return money((line.quantity ?? 1) * (Number(line.unitCost) || 0) * (1 + (line.markupPct ?? est.markupPct ?? 20) / 100)); }
+function clientFinancials(p) {
+  const d = booksData();
+  const est = p.estimate || {};
+  const included = (est.lines || []).filter((l) => !l.isOptional);
+  const contract = { type: 'fixedPrice', feePct: 15, retainagePct: 0, sov: [], ...(p.contract || {}) };
+  const orders = all('changeOrder').filter((o) => sameId(o.projectID, p.id));
+  const f = { contractType: contract.type, feePct: Number(contract.feePct) || 0 };
+  const sovSum = money((contract.sov || []).reduce((s, l) => s + (Number(l.scheduledValue) || 0), 0));
+  f.originalContract = sovSum > 0 ? sovSum : money(included.reduce((s, l) => s + estimatePrice(est, l), 0));
+  f.approvedChanges = money(orders.filter((o) => o.status === 'approved').reduce((s, o) => s + (Number(o.amount) || 0), 0));
+  f.approvedChangeCost = money(orders.filter((o) => o.status === 'approved').reduce((s, o) => s + (Number(o.cost) || 0), 0));
+  f.pendingChanges = money(orders.filter((o) => o.status === 'pending' || o.status === 'draft' || !o.status).reduce((s, o) => s + (Number(o.amount) || 0), 0));
+  const budget = (p.budget || []).reduce((s, b) => s + budgetItemTotal(b), 0) * (1 + (p.contingencyPct ?? 10) / 100);
+  f.estimatedCost = money(budget > 0 ? budget : money(included.reduce((s, l) => s + (l.quantity ?? 1) * (Number(l.unitCost) || 0), 0)) + f.approvedChangeCost);
+  f.committed = money(all('commitment').filter((c) => sameId(c.projectID, p.id) && commitmentIsCommitted(c)).reduce((s, c) => s + commitmentAmount(c), 0));
+  let cost = 0, income = 0, retainage = 0;
+  for (const x of d.postings) {
+    if (!sameId(x.projectID, p.id)) continue;
+    const type = d.account(x.accountID)?.type;
+    if (!type) continue;
+    if (type === 'jobCost') cost += x.amount;
+    else if (type === 'income') income -= x.amount;
+    if (sameId(x.accountID, d.sys.retainageReceivable)) retainage += x.amount;
+  }
+  f.costToDate = money(cost); f.billedToDate = money(income); f.retainageReceivable = money(retainage);
+  f.laborCostToDate = 0; f.laborAtBillRates = 0;
+  if (contract.type === 'timeAndMaterials') {
+    const labor = d.account(chartID('5150')) ? chartID('5150') : (d.account(chartID('5100')) ? chartID('5100') : d.sys.uncategorizedExpense);
+    f.laborCostToDate = money(d.postings.filter((x) => sameId(x.projectID, p.id) && sameId(x.accountID, labor)).reduce((s, x) => s + x.amount, 0));
+    f.laborAtBillRates = money(all('timeEntry').filter((t) => sameId(t.projectID, p.id) && t.billable !== false && (t.billRate || 0) > 0).reduce((s, t) => s + money(((t.hours || 0) + (t.overtimeHours || 0)) * t.billRate), 0));
+  }
+  let received = 0, open = 0;
+  for (const t of d.transactions) {
+    if (!sameId(t.projectID, p.id) || t.type !== 'invoice' || t.isVoid) continue;
+    received += (t.payments || []).reduce((s, x) => s + (Number(x.amount) || 0), 0);
+    open += txnBalance(t);
+  }
+  f.received = money(received); f.openInvoices = money(open);
+  const costPlus = contract.type !== 'fixedPrice';
+  const factor = 1 + f.feePct / 100;
+  f.contractTotal = costPlus ? money(Math.max(f.estimatedCost, f.costToDate) * factor) : money(f.originalContract + f.approvedChanges);
+  f.projectedProfit = money(f.contractTotal - Math.max(f.estimatedCost, f.costToDate));
+  f.projectedMargin = f.contractTotal > 0 ? f.projectedProfit / f.contractTotal : 0;
+  f.percentComplete = f.estimatedCost > 0 ? Math.min(1, f.costToDate / f.estimatedCost) : 0;
+  f.earnedRevenue = contract.type === 'fixedPrice' ? money(f.contractTotal * f.percentComplete)
+    : contract.type === 'costPlus' ? money(f.costToDate * factor) : money(f.laborAtBillRates + (f.costToDate - f.laborCostToDate) * factor);
+  f.overUnderBilled = money(f.billedToDate - f.earnedRevenue);
+  f.costToComplete = money(Math.max(0, f.estimatedCost - f.costToDate));
+  f.leftToBill = money(f.contractTotal - f.billedToDate);
+  return f;
+}

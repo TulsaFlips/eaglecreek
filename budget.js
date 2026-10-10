@@ -6,7 +6,7 @@
  * Selections: the finish schedule (the Mac's SelectionsTab and SelectionMath): what's going in,
  * from whom, where each stands and when to order it. Selections can be added and changed here;
  * they live inside the project record, so each change is kept as a step that's made again on
- * the Mac's newer copy if the project changed there in the meantime (editProject).
+ * the Mac's newer copy if the project changed there in the meantime (editRecord).
  * Subs & POs: what each sub or supplier agreed to, has billed and has left (CommitmentsTab).
  */
 'use strict';
@@ -424,8 +424,8 @@ function packageItems(items) {
   });
 }
 
-// How each change to a job's selections is made on a project (see editProject in app.js).
-Object.assign(PROJECT_OPS, {
+// How each change to a job's selections is made on a project (see editRecord in app.js).
+Object.assign(RECORD_OPS, {
   upsertSelection(p, { item }) {
     const list = Array.isArray(p.selections) ? p.selections : [];
     const at = list.findIndex((x) => sameId(x.id, item.id));

@@ -10,8 +10,9 @@ sync (every few minutes, or **Sync Now**), and the other way round.
 - **Projects:** grouped like the Mac's sidebar (Active Projects, Pipeline, Rentals, Closed), with
   status colours, address and directions, schedule progress, late tasks and open punch items.
   Inside a project, the Mac's sections: Overview, Budget (Budget, Selections, Subs & POs),
-  Schedule (Schedule, Daily Logs, Punch List) and Files (Photos, Documents). Each section
-  remembers the page you were last on.
+  Schedule (Schedule, Daily Logs, Punch List), Money (Summary, Draws, Transactions, Lien
+  Waivers, Reports) and Files (Photos, Documents). Each section remembers the page you were
+  last on.
 - **Budget:** every line by category with its quantity and cost, what's been billed against it in
   the books, % done and the typed actual, with the contingency, total, per square foot, billed to
   date and budget left worked out exactly as the Mac does. Lines billed over budget are flagged.
@@ -24,6 +25,23 @@ sync (every few minutes, or **Sync Now**), and the other way round.
   your finish packages. Marking one Ordered stamps today's order date, as on the Mac.
 - **Subs & POs:** each subcontract and purchase order with what's committed, billed and left, and
   the retainage held.
+- **Books:** the Mac's Books screen. The overview has cash in the bank, bills to pay (overdue in
+  red), what you're owed, profit this year, money in and out for six months, each bank and card
+  balance, bills due and lien waivers to collect. Then every transaction (search, filter by
+  type, status and dates), receipts waiting to be entered on the Mac, lien waivers, the chart of
+  accounts with each account's activity and running balance, and reports: Profit & Loss (for
+  the company, its overhead or one project), Profit by Project, Balance Sheet, Bills to Pay and
+  Owed to You by age, Vendor Payments & 1099s, and Money In and Out. Every number comes from the
+  Mac's own bookkeeping rules, so it matches the Mac to the cent.
+- **A project's Money:** the summary (spent to date, unpaid bills, draws received or what the
+  client owes, waivers needed, the deal's budget vs actual by cost group or a client job's
+  contract vs cost, costs by account, recent activity), the draw schedule with what the lender
+  has funded and what's been billed and paid against each draw, its transactions and lien
+  waivers, and its reports (Job Cost, Draw Reconciliation, P&L, bills and 1099s).
+- **From the site:** collect a lien waiver (snap the signed copy; it's attached to the payment
+  and marked received, progress or final), mark a draw Requested or Inspected with the
+  inspector's notes, and add progress photos or paperwork to a draw for the lender. Bills,
+  invoices and deposits are still entered on the Mac.
 - **Photos:** take or pick photos straight into a project's Progress Photos, or into a daily log.
   They're resized on the phone (2400 px) so they upload fast from the site. Swipe between
   photos; delete one taken by mistake.
@@ -50,11 +68,12 @@ sync (every few minutes, or **Sync Now**), and the other way round.
   contacts and add files to them (a W-9 marks it on file; an insurance certificate can update the
   expiry date). Bills, invoices and subcontracts are view-only here.
 - **Receipts:** the receipt button on Projects sends a photo to Books › Receipts on the Mac.
-- **Appearance:** Light (the default, like the Mac), Dark or Match Device, in Settings.
+- **Appearance:** Light (the default, like the Mac), Dark or Match Device, in Settings (the gear
+  on Projects on a phone; the bottom of the sidebar on an iPad or computer).
 - **Works offline.** Everything is saved on the device first and uploads when there's signal.
 
-Bills, invoices, the budget lines themselves, contracts, QuickBooks and the rest are edited on
-the Mac.
+Entering bills, invoices and deposits, the budget lines themselves, contracts, QuickBooks, bank
+imports and reconciling stay on the Mac.
 
 ## Plan reader
 
@@ -121,12 +140,12 @@ Mac app's Settings → Cloud Sync and run `supabase/setup.sql` in the Supabase S
 
 - Edits follow the Mac's rule: the newest edit wins. If the same punch item is changed on the
   phone and the Mac between syncs, the later change is kept.
-- Selections are saved inside the project, which the Mac also edits. Each change made here is
-  kept as a step until it reaches Supabase; if the project changed on the Mac in the meantime
-  (even while the phone had no signal), the step is made again on the Mac's newer copy, so
-  neither edit is lost. The one case to avoid: changing the same project on the Mac in the few
-  minutes before it syncs, while selections are changed here. Then the Mac keeps both versions
-  (one as a conflict copy), as it does between two Macs.
+- Selections and draws are saved inside the project, and lien waivers on the bill, all of which
+  the Mac also edits. Each change made here is kept as a step until it reaches Supabase; if the
+  record changed on the Mac in the meantime (even while the phone had no signal), the step is
+  made again on the Mac's newer copy, so neither edit is lost. The one case to avoid: changing
+  the same project on the Mac in the few minutes before it syncs, while selections are changed
+  here. Then the Mac keeps both versions (one as a conflict copy), as it does between two Macs.
 - The pill at the top shows sync. Tap it to sync now (or, if there's a problem, to see why).
   Photos waiting to upload say so on the photo.
 - Receipts wait in Books › Receipts on the Mac. **Enter as Expense** there reads the store,
