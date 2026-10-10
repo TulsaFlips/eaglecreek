@@ -27,6 +27,13 @@ sync (every few minutes, or **Sync Now**), and the other way round.
 - **Calendar:** day and week views of your events and active projects' tasks. Add, edit and
   delete events, with the Mac's options (repeat, reminder, project, who it's with, delete only
   one repeat).
+- **Contacts:** every trade, supplier, crew member, customer and lender. Call, text or email in a
+  tap; see their projects, open tasks and punch items, subcontracts and POs, bills and invoices
+  (what you've paid them this year, what's owed, lien waivers still needed), and every file tied
+  to them: W-9s, insurance certificates, quotes, invoices, waivers and subcontract paperwork,
+  matched the same way as on the Mac. Expired insurance and missing W-9s are flagged. Add or edit
+  contacts and add files to them (a W-9 marks it on file; an insurance certificate can update the
+  expiry date). Bills, invoices and subcontracts are view-only here.
 - **Receipts:** the receipt button on Projects sends a photo to Books › Receipts on the Mac.
 - **Appearance:** Light (the default, like the Mac), Dark or Match Device, in Settings.
 - **Works offline.** Everything is saved on the device first and uploads when there's signal.

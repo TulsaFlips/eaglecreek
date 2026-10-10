@@ -6,11 +6,15 @@
  */
 'use strict';
 
-const APP_VERSION = '1.2.1';
+const APP_VERSION = '1.3.0';
 // The record kinds kept on this device. Books, QuickBooks and the rest stay on the Mac.
 // planSheet and planMark are the plan reader's scales and measurements (plans.js); the Mac app
 // leaves kinds it doesn't know alone.
-const KINDS = ['project', 'file', 'task', 'dailyLog', 'punchItem', 'event', 'contact', 'company', 'planSheet', 'planMark'];
+// transaction, commitment, changeOrder, payApp and timeEntry are read here (contacts.js) to tie
+// files and work to people; they're edited on the Mac.
+const KINDS = ['project', 'file', 'task', 'dailyLog', 'punchItem', 'event', 'contact', 'company', 'planSheet', 'planMark',
+  'transaction', 'commitment', 'changeOrder', 'payApp', 'timeEntry'];
+const KINDS_KEY = KINDS.join(',');
 const UPLOAD_LIMIT = 50_000_000; // Supabase's free plan, same as the Mac
 
 // ---------------------------------------------------------------------------
@@ -287,7 +291,7 @@ const idb = (() => {
 // ---------------------------------------------------------------------------
 // App state
 
-const freshMeta = () => ({ cursor: null, lastFull: 0, lastSync: 0, uploads: [], storageDeletes: [] });
+const freshMeta = () => ({ cursor: null, lastFull: 0, lastSync: 0, uploads: [], storageDeletes: [], kinds: KINDS_KEY });
 const S = {
   config: null, // { url, key }
   session: null, // { accessToken, refreshToken, expiresAt, userID, email }
@@ -309,7 +313,7 @@ function fresh() {
   const today = fmt.inputDate(new Date());
   if (memo.v !== S.version || memo.day !== today) {
     memo.v = S.version; memo.day = today;
-    memo.byKind = new Map(); memo.schedules = new Map(); memo.byRecord = null; memo.byProject = null;
+    memo.byKind = new Map(); memo.schedules = new Map(); memo.byRecord = null; memo.byProject = null; memo.contactLinks = null;
     for (const row of S.docs.values()) {
       if (row.deleted) continue;
       if (!memo.byKind.has(row.kind)) memo.byKind.set(row.kind, []);
@@ -736,7 +740,7 @@ function photoName(date) {
 }
 
 /** Adds files as the Mac's VaultDocuments: saved here at once, uploaded on the next sync. */
-async function addFiles(fileList, { projectID = null, category = 'progressPhoto', recordID = null, needsReview = false } = {}) {
+async function addFiles(fileList, { projectID = null, category = 'progressPhoto', recordID = null, needsReview = false, contactID = null } = {}) {
   const files = [...fileList];
   if (!files.length) return 0;
   toast(files.length === 1 ? 'Saving…' : `Saving ${files.length} files…`);
@@ -764,6 +768,7 @@ async function addFiles(fileList, { projectID = null, category = 'progressPhoto'
     };
     if (projectID) doc.projectID = projectID;
     if (recordID) doc.recordID = recordID;
+    if (contactID) doc.contactID = contactID;
     const id = key(doc.id);
     await idb.set('blobs', id, { blob, contentType: contentType(ext) });
     S.meta.uploads.push(id);
@@ -1144,6 +1149,7 @@ const TABS = [
   ['projects', 'Projects', 'folder', 'var(--forest)'],
   ['schedule', 'Schedule', 'schedule', 'var(--gold)'],
   ['calendar', 'Calendar', 'calendar', 'var(--clay)'],
+  ['contacts', 'Contacts', 'people', 'var(--walnut)'],
   ['settings', 'Settings', 'settings', 'var(--stone)'],
 ];
 function renderTabs(active) {
@@ -1173,6 +1179,8 @@ function render() {
       case 'log': html = viewLog(r.a); tab = 'projects'; break;
       case 'schedule': html = viewSchedule(); break;
       case 'calendar': html = viewCalendar(); break;
+      case 'contacts': html = viewContacts(); break;
+      case 'contact': html = viewContact(r.a); tab = 'contacts'; break;
       case 'settings': html = viewSettings(); break;
       default: html = viewProjects(); tab = 'projects';
     }
@@ -1189,7 +1197,7 @@ function render() {
   render.lastHash = location.hash;
   hydrateThumbs();
   $$('textarea', main).forEach(autoGrow);
-  if (!sameView) $('.seg .on')?.scrollIntoView({ block: 'nearest', inline: 'center' });
+  if (!sameView) $('#main > nav.seg .on')?.scrollIntoView({ block: 'nearest', inline: 'center' });
 }
 
 function autoGrow(t) {
@@ -1367,7 +1375,7 @@ function projectOverview(p) {
     .sort((a, b) => a.start - b.start).slice(0, 4);
   const logs = all('dailyLog').filter((l) => sameId(l.projectID, p.id)).sort((a, b) => b.date - a.date).slice(0, 3);
 
-  let html = `<div class="page-bar">${pill(statusLabel(p.status), statusColor(p.status))}${p.customerID && contactName(p.customerID) ? `<span class="count small">Customer: ${esc(contactName(p.customerID))}</span>` : ''}</div>`;
+  let html = `<div class="page-bar">${pill(statusLabel(p.status), statusColor(p.status))}${p.customerID && contactName(p.customerID) ? `<a class="count small" href="#/contact/${esc(key(p.customerID))}">Customer: ${esc(contactName(p.customerID))}</a>` : ''}</div>`;
   if (addr) {
     html += `<section class="card flush"><a class="row" href="${mapsLink(addr)}" target="_blank" rel="noopener">
       ${icon('pin', 'ic glyph')}<div class="main"><div class="t">${esc(addr)}</div><div class="s">Directions</div></div>${icon('chev', 'ic chev')}</a></section>`;
@@ -1791,7 +1799,7 @@ function viewSettings() {
     <div class="kv"><span>Status</span><span>${esc(S.syncing ? (S.syncDetail || 'Syncing…') : S.syncError ? 'Needs attention' : navigator.onLine ? (S.meta.lastSync ? 'Up to date' : 'Not synced yet') : 'Offline')}</span></div>
     <div class="kv"><span>Last synced</span><span>${esc(fmt.ago(S.meta.lastSync))}</span></div>
     <div class="kv"><span>Waiting to send</span><span>${pending ? [S.dirty.size ? plural(S.dirty.size, 'change') : '', S.meta.uploads.length ? plural(S.meta.uploads.length, 'file') : ''].filter(Boolean).join(', ') : 'Nothing'}</span></div>
-    <div class="kv"><span>On this device</span><span>${plural(projects().length, 'project')} · ${plural(all('file').length, 'file')}</span></div>
+    <div class="kv"><span>On this device</span><span>${plural(projects().length, 'project')} · ${plural(all('contact').length, 'contact')} · ${plural(all('file').length, 'file')}</span></div>
     ${S.syncError ? banner(S.syncError) : ''}
     <button class="btn primary block" data-act="sync-now" ${S.syncing ? 'disabled' : ''} style="margin-top:6px">${icon('sync')}Sync Now</button>
     <p class="note">Syncs on its own every minute while the app is open, and whenever you make a change.</p>
@@ -1853,7 +1861,7 @@ function sheetTask(id) {
     <div class="form-section"><div class="form-card" style="padding-bottom:12px">
       ${span ? `<div class="kv" style="padding-top:0"><span>When</span><span>${esc(span)}</span></div>` : ''}
       ${s && isLate(s) && ws !== 'done' ? `<div class="kv"><span>Progress</span><span class="alert-text">${PROGRESS[s.progress]}</span></div>` : ''}
-      ${contactName(t.contactID) ? `<div class="kv"><span>Who</span><span>${esc(contactName(t.contactID))}</span></div>` : ''}
+      ${contactName(t.contactID) ? `<div class="kv"><span>Who</span><a href="#/contact/${esc(key(t.contactID))}">${esc(contactName(t.contactID))}</a></div>` : ''}
     </div></div>
     <div class="form-section"><div class="fs-head">Status</div><div class="two">${Object.entries(WORK).map(([k, [label, color]]) => `<button class="btn ${k === ws ? 'primary' : ''}" data-act="task-status" data-id="${esc(key(t.id))}" data-status="${k}"><span class="dot-label" style="--c:${k === ws ? 'var(--on-accent)' : color}">${label}</span></button>`).join('')}</div></div>
     <div class="form-section"><div class="form-card">
@@ -2520,6 +2528,8 @@ async function boot() {
       S.dirty = new Set(meta.dirty || []);
       delete meta.dirty;
       S.meta = { ...freshMeta(), ...meta };
+      // This version keeps more kinds of records: read everything once to pick up the older ones.
+      if (S.meta.kinds !== KINDS_KEY) { S.meta.cursor = null; S.meta.lastFull = 0; S.meta.kinds = KINDS_KEY; }
     }
     for (const [k, row] of await idb.all('docs')) S.docs.set(k, row);
   } catch (e) {
