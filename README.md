@@ -9,9 +9,10 @@ sync (every few minutes, or **Sync Now**), and the other way round.
 
 - **Projects:** grouped like the Mac's sidebar (Active Projects, Pipeline, Rentals, Closed), with
   status colours, address and directions, schedule progress, late tasks and open punch items.
-  Inside a project, the Mac's sections: Overview, Budget (Budget, Selections, Subs & POs),
-  Schedule (Schedule, Daily Logs, Punch List), Money (Summary, Draws, Transactions, Lien
-  Waivers, Reports) and Files (Photos, Documents). Each section remembers the page you were
+  Inside a project, the Mac's sections: Overview, Contract on client jobs (Terms, Schedule of
+  Values, Change Orders), Budget (Budget, Selections, Subs & POs),
+  Schedule (Schedule, Daily Logs, Punch List), Money (Summary, Draws or Pay Applications,
+  Transactions, Lien Waivers, Reports) and Files (Photos, Documents). Each section remembers the page you were
   last on.
 - **Budget:** every line by category with its quantity and cost, what's been billed against it in
   the books, % done and the typed actual, with the contingency, total, per square foot, billed to
@@ -38,6 +39,16 @@ sync (every few minutes, or **Sync Now**), and the other way round.
   contract vs cost, costs by account, recent activity), the draw schedule with what the lender
   has funded and what's been billed and paid against each draw, its transactions and lien
   waivers, and its reports (Job Cost, Draw Reconciliation, P&L, bills and 1099s).
+- **Contracts (client jobs):** the terms (client, type, retainage, payment terms, signed, start
+  and completion dates against where the schedule finishes), the schedule of values with what's
+  been billed on each line, and change orders. Write a change order on site (what changes, your
+  cost, the price at the job's markup, days added), mark it sent or rejected, and attach the
+  signed copy; approve it on the Mac, since approving changes the contract and the budget.
+  Selections over the client's allowances can go straight onto a change order.
+- **Pay applications:** each one worked out like the Mac's (contract sum, completed and stored,
+  retainage, previous applications, deposit, current payment due, balance to finish) with its
+  continuation sheet line by line, and its invoice's status. Cost-plus and T&M jobs show their
+  billing instead: billed, earned, cost to date and invoices.
 - **From the site:** collect a lien waiver (snap the signed copy; it's attached to the payment
   and marked received, progress or final), mark a draw Requested or Inspected with the
   inspector's notes, and add progress photos or paperwork to a draw for the lender. Bills,
@@ -72,8 +83,9 @@ sync (every few minutes, or **Sync Now**), and the other way round.
   on Projects on a phone; the bottom of the sidebar on an iPad or computer).
 - **Works offline.** Everything is saved on the device first and uploads when there's signal.
 
-Entering bills, invoices and deposits, the budget lines themselves, contracts, QuickBooks, bank
-imports and reconciling stay on the Mac.
+Entering bills, invoices and deposits, the budget lines themselves, contract terms and the
+schedule of values, approving change orders, making pay applications, QuickBooks, bank imports
+and reconciling stay on the Mac.
 
 ## Plan reader
 
@@ -140,8 +152,8 @@ Mac app's Settings → Cloud Sync and run `supabase/setup.sql` in the Supabase S
 
 - Edits follow the Mac's rule: the newest edit wins. If the same punch item is changed on the
   phone and the Mac between syncs, the later change is kept.
-- Selections and draws are saved inside the project, and lien waivers on the bill, all of which
-  the Mac also edits. Each change made here is kept as a step until it reaches Supabase; if the
+- Selections and draws are saved inside the project, lien waivers on the bill and change orders
+  on their own, all of which the Mac also edits. Each change made here is kept as a step until it reaches Supabase; if the
   record changed on the Mac in the meantime (even while the phone had no signal), the step is
   made again on the Mac's newer copy, so neither edit is lost. The one case to avoid: changing
   the same project on the Mac in the few minutes before it syncs, while selections are changed

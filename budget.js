@@ -275,7 +275,7 @@ function projectSelections(p) {
   if (markup != null && sum.overage > 0) {
     const unbilled = Math.max(0, money(sum.overage - overageBilled(p.id)));
     html += unbilled > 0
-      ? banner(`Selections are ${fmt.money(sum.overage)} over the client's allowances; ${fmt.money(unbilled)} isn't on a change order yet.`)
+      ? `<div class="banner" style="--c:var(--warning)">${icon('warn')}<div>${esc(`Selections are ${fmt.money(sum.overage)} over the client's allowances; ${fmt.money(unbilled)} isn't on a change order yet.`)}${typeof overageChangeOrderFields === 'function' ? `<div style="margin-top:8px"><button class="btn sm" data-act="co-overage" data-project="${pid}">Create Change Order</button></div>` : ''}</div></div>`
       : `<div class="banner" style="--c:var(--success)">${icon('checkCircle')}<div>Selections are ${esc(fmt.money(sum.overage))} over the client's allowances, all on change orders.</div></div>`;
   }
   // Budget lines whose selections add up to more than the line.
