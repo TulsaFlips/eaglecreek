@@ -6,14 +6,14 @@
  */
 'use strict';
 
-const APP_VERSION = '1.3.0';
-// The record kinds kept on this device. Books, QuickBooks and the rest stay on the Mac.
+const APP_VERSION = '1.4.0';
+// The record kinds kept on this device. QuickBooks, bank imports and the rest stay on the Mac.
 // planSheet and planMark are the plan reader's scales and measurements (plans.js); the Mac app
 // leaves kinds it doesn't know alone.
-// transaction, commitment, changeOrder, payApp and timeEntry are read here (contacts.js) to tie
-// files and work to people; they're edited on the Mac.
+// books (the chart of accounts), transaction, commitment, changeOrder, payApp and timeEntry are
+// read for Contacts, the budget and the money pages; they're edited on the Mac.
 const KINDS = ['project', 'file', 'task', 'dailyLog', 'punchItem', 'event', 'contact', 'company', 'planSheet', 'planMark',
-  'transaction', 'commitment', 'changeOrder', 'payApp', 'timeEntry'];
+  'transaction', 'commitment', 'changeOrder', 'payApp', 'timeEntry', 'books'];
 const KINDS_KEY = KINDS.join(',');
 const UPLOAD_LIMIT = 50_000_000; // Supabase's free plan, same as the Mac
 
@@ -291,7 +291,7 @@ const idb = (() => {
 // ---------------------------------------------------------------------------
 // App state
 
-const freshMeta = () => ({ cursor: null, lastFull: 0, lastSync: 0, uploads: [], storageDeletes: [], kinds: KINDS_KEY });
+const freshMeta = () => ({ cursor: null, lastFull: 0, lastSync: 0, uploads: [], storageDeletes: [], kinds: KINDS_KEY, projectOps: {} });
 const S = {
   config: null, // { url, key }
   session: null, // { accessToken, refreshToken, expiresAt, userID, email }
@@ -308,12 +308,13 @@ const S = {
 function bump() { S.version++; }
 
 // Lists by kind, schedules and file lookups, worked out once per change.
-const memo = { v: -1, day: '', byKind: new Map(), schedules: new Map(), byRecord: null, byProject: null };
+const memo = { v: -1, day: '', byKind: new Map(), schedules: new Map(), byRecord: null, byProject: null, books: null, cache: new Map() };
 function fresh() {
   const today = fmt.inputDate(new Date());
   if (memo.v !== S.version || memo.day !== today) {
     memo.v = S.version; memo.day = today;
     memo.byKind = new Map(); memo.schedules = new Map(); memo.byRecord = null; memo.byProject = null; memo.contactLinks = null;
+    memo.books = null; memo.cache = new Map(); // books.js and the money pages
     for (const row of S.docs.values()) {
       if (row.deleted) continue;
       if (!memo.byKind.has(row.kind)) memo.byKind.set(row.kind, []);
@@ -385,6 +386,32 @@ async function deleteRecord(kind, id) {
   await idb.set('docs', k, row);
   await saveMeta();
   scheduleSync();
+}
+
+/**
+ * Changes to a project record, which the Mac edits too (a job's selections live inside it).
+ * Each change is kept as a small step (PROJECT_OPS, from budget.js) until it has reached
+ * Supabase. If the project changed on the Mac in the meantime, the steps are made again on the
+ * Mac's newer copy before it's sent (applyRemote), so neither side's edit is lost, with signal
+ * or without. Returns the project as saved here.
+ */
+const PROJECT_OPS = {};
+function applyProjectOps(p, ops) {
+  for (const op of ops) PROJECT_OPS[op.op]?.(p, op);
+  return p;
+}
+async function editProject(projectID, ops) {
+  const current = project(projectID);
+  if (!current) { toast('This project was deleted on the Mac.'); return null; }
+  const k = key(projectID);
+  if (!S.meta.projectOps[k]) S.meta.projectOps[k] = { base: Number(current.updatedAt) || 0, ops: [] };
+  S.meta.projectOps[k].ops.push(...clone(ops));
+  const p = applyProjectOps(clone(current), ops);
+  await saveRecord('project', p, { upload: true });
+  clearTimeout(syncTimer);
+  syncNow();
+  renderSoon();
+  return p;
 }
 
 // ---------------------------------------------------------------------------
@@ -541,12 +568,29 @@ async function applyRemote(rows) {
   const puts = [];
   const dels = [];
   let changed = false;
+  let rebasedAny = false;
   for (const r of rows) {
     if (!r || !r.id || !KINDS.includes(r.kind)) continue;
     const id = key(r.id);
     const data = r.data && typeof r.data === 'object' ? r.data : {};
     const remoteStamp = Number(data.updatedAt) || 0;
     const local = S.docs.get(id);
+    const pending = r.kind === 'project' && !r.deleted && S.meta.projectOps?.[id];
+    if (pending && local && S.dirty.has(id)) {
+      const localStamp = Number(local.data?.updatedAt) || 0;
+      // Changed on the Mac since the copy these edits were made on: make them again on its copy.
+      if (Math.abs(remoteStamp - pending.base) > 0.001 && Math.abs(remoteStamp - localStamp) > 0.001) {
+        const rebased = applyProjectOps(clone(data), pending.ops);
+        rebased.updatedAt = Math.max(stamp(), remoteStamp + 0.001);
+        pending.base = remoteStamp;
+        const row = { id, kind: r.kind, deleted: false, data: rebased };
+        S.docs.set(id, row);
+        puts.push([id, row]);
+        changed = true;
+        rebasedAny = true;
+        continue;
+      }
+    }
     if (local && S.dirty.has(id)) {
       const localStamp = Number(local.data?.updatedAt) || 0;
       if (remoteStamp - localStamp <= 0.001) continue; // ours is newer: keep it and send it
@@ -563,6 +607,7 @@ async function applyRemote(rows) {
     changed = true;
   }
   if (puts.length || dels.length) await idb.batch('docs', puts, dels);
+  if (rebasedAny) await saveMeta();
   if (changed) bump();
   return changed;
 }
@@ -645,6 +690,7 @@ async function pushChanges(token) {
       // Clear only what went up; anything edited meanwhile goes next time.
       if (row && row.data.updatedAt === s.stamp) {
         S.dirty.delete(s.id);
+        delete S.meta.projectOps[s.id]; // its edits are in Supabase now
         if (row.deleted) { S.docs.delete(s.id); dels.push(s.id); }
       }
     }
@@ -1197,7 +1243,7 @@ function render() {
   render.lastHash = location.hash;
   hydrateThumbs();
   $$('textarea', main).forEach(autoGrow);
-  if (!sameView) $('#main > nav.seg .on')?.scrollIntoView({ block: 'nearest', inline: 'center' });
+  if (!sameView) $$('#main > nav.seg .on').forEach((el) => el.scrollIntoView({ block: 'nearest', inline: 'center' }));
 }
 
 function autoGrow(t) {
@@ -1328,7 +1374,35 @@ function projectResults() {
 
 // ----- One project
 
-const PAGES = [['overview', 'Overview'], ['schedule', 'Schedule'], ['logs', 'Daily Logs'], ['punch', 'Punch List'], ['photos', 'Photos'], ['documents', 'Documents']];
+// The Mac's project sections and the pages in each (Store/Navigation.swift). Pages come from the
+// modules that draw them (budget.js, money.js, contracts.js add theirs to PROJECT_PAGES); a section
+// shows only the pages this version has.
+const PROJECT_SECTIONS = [
+  { id: 'overview', title: 'Overview', pages: ['overview'] },
+  { id: 'contract', title: 'Contract', pages: ['contract', 'sov', 'changeOrders'], clientOnly: true },
+  { id: 'budget', title: 'Budget', pages: ['budget', 'selections', 'subs'] },
+  { id: 'schedule', title: 'Schedule', pages: ['schedule', 'logs', 'punch'] },
+  { id: 'money', title: 'Money', pages: (p) => (p.kind === 'clientJob' ? ['billing', 'payApps', 'transactions', 'lienWaivers', 'reports'] : ['billing', 'draws', 'transactions', 'lienWaivers', 'reports']) },
+  { id: 'files', title: 'Files', pages: ['photos', 'documents'] },
+];
+const PROJECT_PAGES = {
+  overview: ['Overview', (p) => projectOverview(p)],
+  schedule: ['Schedule', (p) => projectSchedule(p)],
+  logs: ['Daily Logs', (p) => projectLogs(p)],
+  punch: ['Punch List', (p) => projectPunch(p)],
+  photos: ['Photos', (p) => projectPhotos(p)],
+  documents: ['Documents', (p) => projectDocuments(p)],
+};
+function projectSections(p) {
+  return PROJECT_SECTIONS.filter((s) => !s.clientOnly || p.kind === 'clientJob')
+    .map((s) => ({ ...s, pages: (typeof s.pages === 'function' ? s.pages(p) : s.pages).filter((pg) => PROJECT_PAGES[pg]) }))
+    .filter((s) => s.pages.length);
+}
+/** A page's title; a few read differently on a client job, as on the Mac. */
+function pageTitle(page, p) {
+  if (page === 'payApps' && p.contract?.type && p.contract.type !== 'fixedPrice') return 'Billing';
+  return PROJECT_PAGES[page][0];
+}
 
 function viewProject(id, page) {
   const p = project(id);
@@ -1338,9 +1412,14 @@ function viewProject(id, page) {
   }
   setHeader({ title: projectName(p), sub: [p.jobNumber ? `Job ${p.jobNumber}` : '', KIND_LABEL[p.kind] || ''].filter(Boolean).join(' · '), back: '#/projects' });
   const pid = esc(key(p.id));
-  const seg = `<nav class="seg" aria-label="Project pages">${PAGES.map(([t, l]) => `<a href="#/project/${pid}/${t}" class="${t === page ? 'on' : ''}">${l}</a>`).join('')}</nav>`;
-  const body = { overview: projectOverview, schedule: projectSchedule, logs: projectLogs, punch: projectPunch, photos: projectPhotos, documents: projectDocuments }[page] || projectOverview;
-  return seg + body(p);
+  const sections = projectSections(p);
+  const section = sections.find((s) => s.pages.includes(page)) || sections[0];
+  if (!section.pages.includes(page)) page = section.pages[0];
+  prefs.set(`page-${section.id}`, page);
+  const lastPage = (s) => { const last = prefs.get(`page-${s.id}`, s.pages[0]); return s.pages.includes(last) ? last : s.pages[0]; };
+  let nav = `<nav class="seg" aria-label="Project sections">${sections.map((s) => `<a href="#/project/${pid}/${lastPage(s)}" class="${s === section ? 'on' : ''}">${s.title}</a>`).join('')}</nav>`;
+  if (section.pages.length > 1) nav += `<nav class="seg sub" aria-label="${esc(section.title)} pages">${section.pages.map((pg) => `<a href="#/project/${pid}/${pg}" class="${pg === page ? 'on' : ''}">${esc(pageTitle(pg, p))}</a>`).join('')}</nav>`;
+  return nav + PROJECT_PAGES[page][1](p);
 }
 
 function todaysLog(projectID) {

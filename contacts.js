@@ -42,7 +42,7 @@ const TXN_STATUS = {
   overdue: ['Overdue', 'var(--danger)'], paid: ['Paid', 'var(--success)'], posted: ['Recorded', 'var(--stone)'], void: ['Void', 'var(--stone)'],
 };
 const WAIVER = { needed: 'Needed', conditional: 'Conditional', unconditional: 'Received', notRequired: 'N/A' };
-const METHODS = { check: 'Check', ach: 'ACH', card: 'Card', cash: 'Cash', wire: 'Wire', zelle: 'Zelle', other: 'Other' };
+const METHODS = { check: 'Check', ach: 'ACH', wire: 'Wire', card: 'Card', cash: 'Cash', zelle: 'Zelle / Venmo', other: 'Other' };
 const tracksBalance = (t) => t.type === 'bill' || t.type === 'invoice';
 function txnSubtotal(t) {
   const lines = t.lines || [];
@@ -79,7 +79,8 @@ function vendorPayments(t) {
   return [];
 }
 const txnLabel = (t) => `${TXN_TYPES[t.type] || 'Transaction'}${(t.number || '').trim() ? ` ${t.number.trim()}` : ''}`;
-const commitmentAmount = (c) => money((c.lines || []).reduce((s, l) => s + (Number(l.amount) || 0), 0) + (c.changes || []).reduce((s, x) => s + (Number(x.amount) || 0), 0));
+/** A subcontract or PO's amount with its approved changes (Commitment.revisedAmount). */
+const commitmentAmount = (c) => money(money((c.lines || []).reduce((s, l) => s + (Number(l.amount) || 0), 0)) + money((c.changes || []).reduce((s, x) => s + (Number(x.amount) || 0), 0)));
 const COMMITMENT_STATUS = { draft: ['Draft', 'var(--stone)'], issued: ['Sent', 'var(--slate)'], signed: ['Signed', 'var(--forest)'], complete: ['Complete', 'var(--success)'], void: ['Void', 'var(--stone)'] };
 function commitmentTitle(c) {
   const label = (c.number || '').trim() ? `${c.kind === 'purchaseOrder' ? 'PO' : 'SC'} ${c.number.trim()}` : (c.kind === 'purchaseOrder' ? 'Purchase Order' : 'Subcontract');
@@ -438,8 +439,8 @@ function sheetCommitment(id) {
   if (!c) return;
   const p = c.projectID ? project(c.projectID) : null;
   const st = COMMITMENT_STATUS[c.status] || COMMITMENT_STATUS.draft;
-  const billed = all('transaction').filter((t) => sameId(t.commitmentID, c.id) && !t.isVoid);
-  const billedTotal = billed.reduce((s, t) => s + txnTotal(t), 0);
+  const tot = commitmentTotals(c);
+  const billed = tot.bills;
   const kv = (l, v) => `<div class="kv"><span>${esc(l)}</span><span class="num">${esc(v)}</span></div>`;
   const lines = (c.lines || []).map((l) => kv((l.description || '').trim() || 'Line', fmt.money(l.amount, true))).join('');
   const changes = (c.changes || []).map((x) => kv(`${fmt.short(fromSec(x.date))} · ${(x.description || '').trim() || 'Change'}`, fmt.money(x.amount, true))).join('');
@@ -447,10 +448,12 @@ function sheetCommitment(id) {
   openSheet(`${sheetHead(commitmentTitle(c), [contactName(c.contactID), p ? projectName(p) : ''].filter(Boolean).join(' · '))}
     <div class="page-bar">${pill(st[0], st[1])}<span class="count small">Edit it in the Mac app</span></div>
     <section class="card"><div style="margin:-4px 0">
-      ${kv('Amount', fmt.money(commitmentAmount(c), true))}
-      ${kv('Billed so far', `${fmt.money(billedTotal, true)} (${plural(billed.length, 'bill')})`)}
-      ${kv('Left to bill', fmt.money(commitmentAmount(c) - billedTotal, true))}
-      ${c.retainagePct ? kv('Retainage', `${c.retainagePct}%`) : ''}
+      ${kv((c.changes || []).length ? 'Amount with changes' : 'Amount', fmt.money(tot.revised, true))}
+      ${kv('Billed so far', `${fmt.money(tot.billed, true)} (${plural(billed.length, 'bill')})`)}
+      ${kv('Left to bill', fmt.money(tot.remaining, true))}
+      ${kv('Paid', fmt.money(tot.paid, true))}
+      ${tot.openBalance ? kv('You owe now', fmt.money(tot.openBalance, true)) : ''}
+      ${c.retainagePct ? kv('Retainage', `${c.retainagePct}%${tot.retainageOutstanding ? ` · ${fmt.money(tot.retainageOutstanding, true)} held` : ''}`) : tot.retainageOutstanding ? kv('Retainage held', fmt.money(tot.retainageOutstanding, true)) : ''}
       ${c.startDate != null ? kv('Start', fmt.date(fromSec(c.startDate))) : ''}
       ${c.finishDate != null ? kv('Finish', fmt.date(fromSec(c.finishDate))) : ''}
     </div></section>
