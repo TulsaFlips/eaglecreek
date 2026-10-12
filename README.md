@@ -109,6 +109,36 @@ Entering bills, invoices and deposits (travel expenses and personal purchases ca
 here), the budget lines themselves, contract terms and the schedule of values, approving change
 orders, making pay applications, QuickBooks, bank imports and reconciling stay on the Mac.
 
+## With Eagle Creek v1.3 and Eagle Creek Books
+
+The web app works with Eagle Creek v1.3 and later and with Eagle Creek Books (the Mac app
+for bank feeds, reconciling, 1099s and the accountant package). All three use the same
+records in your Supabase project.
+
+- **Nothing is overwritten by an older copy.** v1.3's `setup.sql` makes Supabase keep the newer
+  copy when two devices save the same record. The web app checks what Supabase actually took:
+  - Changes kept as steps (selections, draws, lien waivers, change orders, trips, expenses) are
+    made again on the newer copy and sent, so both edits are kept.
+  - Any other change gives way to the newer one, as on the Mac, and the app says so.
+  - An edit here is always stamped after the copy it was made on, so a Mac whose clock runs fast
+    can't make it look older.
+- **Tags** from Eagle Creek Books show on each entry in Books › Transactions. Filter by a tag, or
+  search for one.
+- **Money recorded in both sets of books** (Eagle Creek Books' Business ↔ Personal) is marked
+  on the entry. Changing its amount or how it was paid, or deleting it, reminds you to change
+  the personal side in Eagle Creek Books too.
+- **Personal card lines in Eagle Creek Books.** A purchase entered here as paid personally is
+  offered under **Already in the business books** when its card line reaches Eagle Creek Books
+  (v1.3.1). Only the personal side is added there, so it isn't counted twice.
+  - Kept in as your contribution: the personal side goes to Investment in the Business.
+  - Canadian-dollar lines are found by the CA$ amount kept on the expense.
+- **W-9 details** (tax classification, the last four of the taxpayer ID, the 1099 mailing
+  address) show on the vendor's contact page. They're entered in Eagle Creek Books. Editing a
+  contact here keeps them.
+- **The change history** in Eagle Creek Books shows changes made here as **Web app**.
+- **On a Mac,** in Chrome or Safari, an entry's sheet has **Open in Eagle Creek** and **Open in
+  Eagle Creek Books**, and Books › Overview links to Eagle Creek Books' Banking and 1099s.
+
 ## Plan reader
 
 - **Move around:** pinch to zoom, drag to move, double-tap to zoom in (again to zoom out).
@@ -173,7 +203,7 @@ Mac app's Settings → Cloud Sync and run `supabase/setup.sql` in the Supabase S
 ## Good to know
 
 - Edits follow the Mac's rule: the newest edit wins. If the same punch item is changed on the
-  phone and the Mac between syncs, the later change is kept.
+  phone and the Mac between syncs, the later change is kept (and the app says when the Mac's won).
 - Selections and draws are saved inside the project, lien waivers on the bill, change orders and
   trips on their own, all of which the Mac also edits. Each change made here is kept as a step until it reaches Supabase; if the
   record changed on the Mac in the meantime (even while the phone had no signal), the step is

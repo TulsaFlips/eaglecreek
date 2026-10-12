@@ -217,6 +217,25 @@ function contactFileRow(f) {
     <div class="main"><div class="t">${esc(fileTitle(f))}</div><div class="s">${esc(sub)}${isPending(f) ? ' · Waiting to upload' : ''}</div></div>${icon('chev', 'ic chev')}</button>`;
 }
 
+/** W-9 line 3 (Eagle Creek Books' TaxClassification). */
+const TAX_CLASSIFICATIONS = {
+  individual: 'Individual or single-member LLC', cCorporation: 'C corporation', sCorporation: 'S corporation', partnership: 'Partnership',
+  trustEstate: 'Trust or estate', llcC: 'LLC taxed as a C corporation', llcS: 'LLC taxed as an S corporation', llcP: 'LLC taxed as a partnership',
+  exempt: 'Tax-exempt organization', other: 'Other',
+};
+/** "EIN ending 1234": the number itself stays in Eagle Creek Books. */
+function maskedTaxID(c) {
+  const digits = String(c.taxID || '').replace(/\D/g, '');
+  if (!digits) return '';
+  return `${(c.taxIDType || '').trim() || 'Taxpayer ID'} ending ${digits.slice(-4)}`;
+}
+/** The 1099 mailing address from its parts, when they've been filled in. */
+function mailingAddress(c) {
+  if (!(c.street || '').trim()) return '';
+  const csz = [(c.city || '').trim(), [(c.state || '').trim(), (c.zip || '').trim()].filter(Boolean).join(' ')].filter(Boolean).join(', ');
+  return [(c.street || '').trim(), (c.street2 || '').trim(), csz].filter(Boolean).join(', ');
+}
+
 function viewContact(id) {
   const c = get(id);
   if (!c || !all('contact').includes(c)) {
@@ -318,10 +337,17 @@ function viewContact(id) {
     kv('Insurance expires', c.insuranceExpires != null ? fmt.date(fromSec(c.insuranceExpires)) : 'Not on file');
     kv('Gets a 1099', c.is1099 ? 'Yes' : 'No');
     if (c.is1099) kv('W-9 on file', c.w9OnFile ? 'Yes' : 'No');
+    // W-9 details kept by Eagle Creek Books (v1.3) for the 1099-NEC.
+    kv('Tax classification', TAX_CLASSIFICATIONS[c.taxClassification] || (c.taxClassification || ''));
+    kv('Taxpayer ID', maskedTaxID(c));
+    if (c.isAttorney) kv('Attorney', 'Yes (gets a 1099 even as a corporation)');
+    const mail = mailingAddress(c);
+    if (mail && mail !== address) kv('1099 mailing address', mail);
     kv('Gives lien waivers', c.requiresLienWaivers ? 'Yes' : 'No');
     kv('Pay within', c.paymentTermsDays ? plural(c.paymentTermsDays, 'day') : 'Not set (bills due in 30 days)');
   }
-  html += card('Details', `<div style="padding:0 16px 8px">${rows.join('') || '<div class="empty-line" style="padding:4px 0 10px">Nothing filled in yet.</div>'}</div>`, { action: `<button class="btn link" data-act="contact-edit" data-id="${cid}">Edit</button>` });
+  const w9Gap = c.kind === 'vendor' && c.is1099 && (!(c.taxClassification || '').trim() || String(c.taxID || '').replace(/\D/g, '').length !== 9);
+  html += card('Details', `<div style="padding:0 16px 8px">${rows.join('') || '<div class="empty-line" style="padding:4px 0 10px">Nothing filled in yet.</div>'}${w9Gap ? '<p class="note" style="margin:8px 0 4px">The W-9’s taxpayer ID and tax classification go in Eagle Creek Books (Vendors & Customers) for the 1099.</p>' : ''}</div>`, { action: `<button class="btn link" data-act="contact-edit" data-id="${cid}">Edit</button>` });
   if ((c.notes || '').trim()) html += card('Notes', `<div style="white-space:pre-wrap;overflow-wrap:anywhere">${esc(c.notes)}</div>`, { flush: false });
   return html;
 }
@@ -415,6 +441,7 @@ function sheetTransaction(id) {
   body += kv('Project', p ? projectName(p) : 'Company');
   if (who) body += kv(t.type === 'invoice' ? 'Customer' : 'Paid to', who);
   if (t.commitmentID && get(t.commitmentID)) body += kv('Against', commitmentTitle(get(t.commitmentID)));
+  if (txnTags(t).length) body += `<div class="kv"><span>Tags</span>${tagChips(t)}</div>`;
   const lines = (t.lines || []).filter((l) => money(l.amount) || (l.memo || '').trim());
   let lineHtml = lines.map((l) => `<div class="kv"><span>${esc((l.memo || '').trim() || 'Line')}</span><span class="num">${esc(fmt.money(money(l.amount), true))}</span></div>`).join('');
   if (txnTax(t)) lineHtml += kv('Sales tax', fmt.money(txnTax(t), true));
@@ -427,11 +454,13 @@ function sheetTransaction(id) {
   const files = all('file').filter((f) => sameId(f.transactionID, t.id));
   openSheet(`${sheetHead(txnLabel(t), who)}
     <div class="page-bar">${pill(TXN_STATUS[st][0], TXN_STATUS[st][1])}<span class="count small">Edit it in the Mac app</span></div>
+    ${isPaired(t) ? banner('Also in your personal books: Eagle Creek Books recorded this as money between you and the business.', 'var(--slate)') : ''}
     <section class="card"><div style="margin:-4px 0">${body}</div></section>
     <section class="card"><div class="card-head"><h2>Amounts</h2></div><div style="margin-top:-6px">${lineHtml}</div></section>
     ${payHtml ? `<section class="card"><div class="card-head"><h2>Payments</h2></div><div style="margin-top:-6px">${payHtml}</div></section>` : ''}
     ${files.length ? card(`Files (${files.length})`, files.map(contactFileRow).join('')) : ''}
-    ${(t.memo || '').trim() ? card('Memo', `<div style="white-space:pre-wrap">${esc(t.memo)}</div>`, { flush: false }) : ''}`);
+    ${(t.memo || '').trim() ? card('Memo', `<div style="white-space:pre-wrap">${esc(t.memo)}</div>`, { flush: false }) : ''}
+    ${onMacDesktop() ? `<div class="btn-row"><a class="btn link-out" href="${esc(`eaglecreek://transaction/${String(t.id).toUpperCase()}`)}">Open in Eagle Creek</a><a class="btn link-out" href="${esc(booksAppLink('transaction', t.id))}">Open in Eagle Creek Books</a></div>` : ''}`);
 }
 
 function sheetCommitment(id) {

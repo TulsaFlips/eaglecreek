@@ -71,7 +71,7 @@ function contributionEntry(expense, existing = null) {
   const t = existing ? clone(existing) : {
     id: contributionID(expense.id), type: 'journal', createdAt: stamp(), number: '', method: 'other', payments: [], taxPct: 0, feesWithheld: 0,
     isVoid: false, terms: '', billTo: '', waiver: { status: 'needed', scope: 'progress' }, isCleared: false, toCleared: false, retainageHeld: 0,
-    isDeposit: false, depositApplied: 0, billedCosts: [],
+    isDeposit: false, depositApplied: 0, billedCosts: [], tags: [],
   };
   t.payee = 'Owner contribution';
   t.date = expense.date;
@@ -230,7 +230,7 @@ function newExpenseShell(id = newId()) {
   return {
     id, type: 'expense', createdAt: stamp(), payee: '', number: '', date: stamp(), method: 'card', lines: [], payments: [], memo: '', taxPct: 0,
     feesWithheld: 0, isVoid: false, terms: '', billTo: '', waiver: { status: 'needed', scope: 'progress' }, isCleared: false, toCleared: false,
-    retainageHeld: 0, isDeposit: false, depositApplied: 0, billedCosts: [],
+    retainageHeld: 0, isDeposit: false, depositApplied: 0, billedCosts: [], tags: [],
   };
 }
 
@@ -574,7 +574,7 @@ function sheetExpense({ id = null, tripID = null, files = [] } = {}) {
         <label class="field"><span>Category</span><select name="accountID"><option value="">Uncategorized</option>${line.accountID && !cats.some((a) => sameId(a.id, line.accountID)) ? `<option value="${esc(line.accountID)}" selected>${esc(d.accountName(line.accountID))}</option>` : ''}${cats.map((a) => `<option value="${esc(a.id)}" ${sameId(a.id, line.accountID) ? 'selected' : ''}>${esc(accountDisplayName(a))}</option>`).join('')}</select></label>
         <label class="field"><span>Project</span><select name="projectID"><option value="">Company (no project)</option>${jobs.map((p) => `<option value="${esc(p.id)}" ${sameId(p.id, projectID) ? 'selected' : ''}>${esc(projectName(p))}</option>`).join('')}</select></label>
         <label class="field"><span>Notes</span><textarea name="memo" rows="1" placeholder="Who you met, what it was for">${esc(t.memo || '')}</textarea></label>
-      </div></div>
+      </div>${existing && isPaired(existing) ? `<div class="fs-foot">${esc(PAIRED_NOTE)}</div>` : ''}</div>
       <div class="sheet-actions">${existing ? `<button type="button" class="btn danger" data-act="expense-delete" data-id="${esc(key(existing.id))}" aria-label="Delete" style="flex:0 0 52px">${icon('trash')}</button>` : ''}<button type="button" class="btn" data-act="sheet-close">Cancel</button><button type="submit" class="btn primary">${existing ? 'Save' : 'Add Expense'}</button></div>
     </form>`, (el) => {
     const f = $('#expense-form', el);
@@ -643,7 +643,8 @@ function sheetExpenseInfo(t) {
     <section class="card"><div style="margin:-4px 0">${body}</div></section>
     ${personal && contributionAccount() ? `<div class="form-section"><div class="fs-head">Paid personally</div><div class="segmented">${[['owner', 'Company pays me back'], ['contribution', 'My contribution']].map(([k, l]) => `<button data-act="expense-personal" data-id="${esc(key(t.id))}" data-as="${k}" class="${(contributed ? 'contribution' : 'owner') === k ? 'on' : ''}">${l}</button>`).join('')}</div></div>` : ''}
     <div class="btn-row"><button class="btn" data-act="txn-open" data-id="${esc(key(t.id))}">Open in Books</button></div>
-    <p class="note" style="text-align:center">It has several lines, so change it on the Mac.</p>`);
+    <p class="note" style="text-align:center">It has several lines, so change it on the Mac.</p>
+    ${isPaired(t) ? `<p class="note" style="text-align:center">${esc(PAIRED_NOTE)}</p>` : ''}`);
 }
 
 function sheetDrive({ id = null, tripID = null } = {}) {
@@ -741,10 +742,10 @@ Object.assign(RECORD_OPS, {
   // A simple expense changed here (one line). Ones changed into splits on the Mac are left alone.
   setExpense(t, { fields, line }) {
     for (const [k, v] of Object.entries(fields)) { if (v == null) delete t[k]; else t[k] = v; }
-    if ((t.lines || []).length <= 1) {
+    if ((t.lines || []).length <= 1 && Object.keys(line).length) {
       const old = (t.lines || [])[0] || { id: newId(), quantity: 1, taxable: true, isDepositCredit: false };
       const next = { ...old, ...line };
-      if (line.accountID == null) delete next.accountID;
+      if ('accountID' in line && line.accountID == null) delete next.accountID;
       t.lines = [next];
     }
   },
@@ -777,18 +778,33 @@ async function saveExpense(f) {
   const paidWith = v('paidWith');
   const personal = paidWith === 'owner' || paidWith === 'contribution';
   const accountID = personal ? d.sys.dueToOwner : (d.account(paidWith)?.id || d.sys.defaultBank);
-  const fields = {
-    payee: v('payee'), date, accountID, method: 'card',
+  // How it was paid matters for 1099s (Eagle Creek Books leaves card payments off): a card
+  // account is a card; otherwise keep what the Mac or Books set.
+  const payType = personal ? null : d.account(accountID)?.type;
+  const method = payType === 'creditCard' ? 'card' : payType === 'bank' ? (existing?.method && existing.method !== 'card' ? existing.method : 'other') : (existing?.method || 'card');
+  let fields = {
+    payee: v('payee'), date, accountID, method,
     projectID: v('projectID') || null, tripID: f.dataset.trip ? (get(f.dataset.trip)?.id || f.dataset.trip) : (existing?.tripID || null), memo: f.elements.memo.value,
   };
-  const line = { accountID: v('accountID') || null, memo: lineMemo, amount: usd, rate: usd, quantity: 1 };
+  let line = { accountID: v('accountID') || null, memo: lineMemo, amount: usd, rate: usd, quantity: 1 };
+  if (existing) {
+    // Only what changed here, so an edit made on the Mac at the same time to anything else
+    // survives when this one is made again on its copy.
+    const same = (a, b) => (a ?? null) === (b ?? null) || (typeof a === 'string' && typeof b === 'string' && key(a) === key(b)) || (typeof a === 'number' && typeof b === 'number' && Math.abs(a - b) < 0.0005);
+    const oldLine = (existing.lines || [])[0] || {};
+    fields = Object.fromEntries(Object.entries(fields).filter(([k, val]) => !same(val, existing[k] ?? null)));
+    line = Object.fromEntries(Object.entries(line).filter(([k, val]) => !same(val, oldLine[k] ?? null)));
+  }
   prefs.set('expense-currency', currency);
   prefs.set('expense-paid-with', paidWith);
   let saved;
   if (existing) {
     // Keep a memo note typed on the Mac that isn't ours.
     const oldMemo = ((existing.lines || [])[0]?.memo || '');
-    if (!kind && oldMemo && !RECEIPT_KINDS.some(([, l]) => oldMemo.startsWith(l)) && !/CA\$/.test(oldMemo)) line.memo = [oldMemo, cadMemo].filter(Boolean).join(' · ');
+    if (!kind && oldMemo && !RECEIPT_KINDS.some(([, l]) => oldMemo.startsWith(l)) && !/CA\$/.test(oldMemo)) {
+      const kept = [oldMemo, cadMemo].filter(Boolean).join(' · ');
+      if (kept !== oldMemo) line.memo = kept; else delete line.memo;
+    }
     saved = await editRecord('transaction', existing.id, [{ op: 'setExpense', fields, line }]);
   } else {
     const t = newExpenseShell(f.dataset.newId);
@@ -880,7 +896,7 @@ Object.assign(ACTIONS, {
     const t = get(el.dataset.id);
     if (!t) return;
     if (booksClosedOn(t.date)) { toast(closedMessage()); return; }
-    if (!confirm(`Delete this ${fmt.money(txnTotal(t), true)} expense?\n\nIt's removed from the books on every device. Its receipt stays in Files.`)) return;
+    if (!confirm(`Delete this ${fmt.money(txnTotal(t), true)} expense?\n\nIt's removed from the books on every device. Its receipt stays in Files.${isPaired(t) ? '\n\nEagle Creek Books recorded it in your personal books too; delete the personal side there (Banking › Undo on its bank line).' : ''}`)) return;
     closeSheet();
     if (get(contributionID(t.id))) await deleteRecord('transaction', contributionID(t.id));
     await deleteRecord('transaction', t.id);
@@ -895,7 +911,7 @@ Object.assign(ACTIONS, {
     await setContributed(t, on);
     $$(`[data-act="expense-personal"][data-id="${el.dataset.id}"]`).forEach((b) => b.classList.toggle('on', b === el));
     renderSoon();
-    toast(on ? 'Kept in as your contribution' : 'Owed back to you');
+    toast(isPaired(t) ? `${on ? 'Kept in as your contribution' : 'Owed back to you'}. Change the personal side in Eagle Creek Books too.` : on ? 'Kept in as your contribution' : 'Owed back to you');
   },
   'drive-new': (el) => sheetDrive({ tripID: el.dataset.trip || null }),
   'drive-open': (el) => sheetDrive({ id: el.dataset.id }),

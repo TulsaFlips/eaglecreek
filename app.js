@@ -6,7 +6,7 @@
  */
 'use strict';
 
-const APP_VERSION = '1.7.0';
+const APP_VERSION = '1.8.0';
 // The record kinds kept on this device. QuickBooks, bank imports and the rest stay on the Mac.
 // planSheet and planMark are the plan reader's scales and measurements (plans.js); the Mac app
 // leaves kinds it doesn't know alone.
@@ -17,6 +17,7 @@ const KINDS = ['project', 'file', 'task', 'dailyLog', 'punchItem', 'event', 'con
   'transaction', 'commitment', 'changeOrder', 'payApp', 'timeEntry', 'books', 'trip', 'mileage', 'usStay'];
 const KINDS_KEY = KINDS.join(',');
 const UPLOAD_LIMIT = 50_000_000; // Supabase's free plan, same as the Mac
+const CLIENT_APP = 'Web app'; // the Mac sends "eaglecreek", Eagle Creek Books "books"
 
 // ---------------------------------------------------------------------------
 // Small helpers
@@ -25,6 +26,17 @@ const $ = (sel, el = document) => el.querySelector(sel);
 const $$ = (sel, el = document) => [...el.querySelectorAll(sel)];
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const stamp = () => Math.round(Date.now()) / 1000; // seconds, to the millisecond (the Mac's precision)
+/**
+ * The stamp for a change made to a copy stamped `base`: now, or just after `base` when another
+ * device's clock runs ahead of this one. Supabase keeps whichever copy has the newer stamp
+ * (setup.sql v1.3), so an edit here must always be newer than the copy it was made on.
+ */
+const stampAfter = (base) => {
+  const now = stamp();
+  const b = Number(base) || 0;
+  // A stamp more than two days ahead isn't a clock running fast; don't follow it.
+  return b >= now && b - now < 172_800 ? Math.round((b + 0.001) * 1000) / 1000 : now;
+};
 const toSec = (date) => Math.round(date.getTime()) / 1000;
 const fromSec = (s) => new Date((s || 0) * 1000);
 const key = (id) => String(id || '').toLowerCase();
@@ -366,8 +378,8 @@ async function saveMeta() {
 
 /** Saves an edited or new record and queues it for upload (the Mac's saveRecord). */
 async function saveRecord(kind, data, { upload = true } = {}) {
-  data.updatedAt = stamp();
   const id = key(data.id);
+  data.updatedAt = stampAfter(Math.max(Number(data.updatedAt) || 0, Number(S.docs.get(id)?.data?.updatedAt) || 0));
   const row = { id, kind, deleted: false, data };
   S.docs.set(id, row);
   if (upload) S.dirty.add(id);
@@ -380,7 +392,7 @@ async function saveRecord(kind, data, { upload = true } = {}) {
 
 async function deleteRecord(kind, id) {
   const k = key(id);
-  const row = { id: k, kind, deleted: true, data: { updatedAt: stamp() } };
+  const row = { id: k, kind, deleted: true, data: { updatedAt: stampAfter(S.docs.get(k)?.data?.updatedAt) } };
   S.docs.set(k, row);
   S.dirty.add(k);
   bump();
@@ -444,7 +456,19 @@ async function api(path, { method = 'GET', query, headers = {}, body, token, raw
   // Signed in, the user's token; before that, only an old-style anon key (a JWT) goes here too.
   if (token) h.Authorization = `Bearer ${token}`;
   else if (anon.startsWith('eyJ')) h.Authorization = `Bearer ${anon}`;
-  const res = await fetch(url.toString(), { method, headers: h, body, cache: 'no-store' });
+  // Which app made each change, for the change history Eagle Creek Books shows (setup.sql v1.3).
+  const named = path.startsWith('/rest/v1/') && !S.noClientHeader;
+  if (named) h['X-Client-App'] = CLIENT_APP;
+  let res;
+  try {
+    res = await fetch(url.toString(), { method, headers: h, body, cache: 'no-store' });
+  } catch (e) {
+    // A Supabase that won't take the extra header (its CORS rules): carry on without it.
+    if (!named || !navigator.onLine) throw e;
+    delete h['X-Client-App'];
+    res = await fetch(url.toString(), { method, headers: h, body, cache: 'no-store' });
+    S.noClientHeader = true;
+  }
   if (!res.ok) {
     let msg = '';
     try {
@@ -583,7 +607,7 @@ async function applyRemote(rows) {
       // Changed on the Mac since the copy these edits were made on: make them again on its copy.
       if (Math.abs(remoteStamp - pending.base) > 0.001 && Math.abs(remoteStamp - localStamp) > 0.001) {
         const rebased = applyRecordOps(clone(data), pending.ops);
-        rebased.updatedAt = Math.max(stamp(), remoteStamp + 0.001);
+        rebased.updatedAt = stampAfter(remoteStamp);
         pending.base = remoteStamp;
         const row = { id, kind: r.kind, deleted: false, data: rebased };
         S.docs.set(id, row);
@@ -669,36 +693,98 @@ async function uploadFiles(session) {
 }
 
 async function pushChanges(token) {
-  const ids = [...S.dirty].filter((id) => S.docs.has(id) && !S.meta.uploads.includes(id));
-  for (let i = 0; i < ids.length; i += 100) {
-    const chunk = ids.slice(i, i + 100);
-    const sent = chunk.map((id) => {
-      const row = S.docs.get(id);
-      return {
-        id, stamp: row.data.updatedAt, deleted: row.deleted, body: {
-          id, kind: row.kind, deleted: row.deleted,
-          updated_at: new Date((row.data.updatedAt || stamp()) * 1000).toISOString(), data: row.data,
-        },
-      };
+  // Supabase keeps the newer copy when two devices save the same record (setup.sql v1.3), and
+  // says which rows it took. One it turned down was changed on the Mac since this device last
+  // looked: its newer copy is fetched, edits kept as steps are made again on it, and it goes
+  // up again; any other edit gives way to the Mac's newer one, as on the Mac.
+  const superseded = [];
+  for (let round = 0; round < 3; round++) {
+    const ids = [...S.dirty].filter((id) => S.docs.has(id) && !S.meta.uploads.includes(id));
+    if (!ids.length) break;
+    const turnedDown = [];
+    for (let i = 0; i < ids.length; i += 100) {
+      const chunk = ids.slice(i, i + 100);
+      const sent = chunk.map((id) => {
+        const row = S.docs.get(id);
+        return {
+          id, stamp: row.data.updatedAt, deleted: row.deleted, body: {
+            id, kind: row.kind, deleted: row.deleted,
+            updated_at: new Date((row.data.updatedAt || stamp()) * 1000).toISOString(), data: row.data,
+          },
+        };
+      });
+      const saved = await api('/rest/v1/documents', {
+        method: 'POST', token, query: [['select', 'id']],
+        headers: { 'Content-Type': 'application/json', Prefer: 'resolution=merge-duplicates,return=representation' },
+        body: JSON.stringify(sent.map((x) => x.body)),
+      });
+      // An older Supabase setup may not list them: then everything sent was taken.
+      const took = Array.isArray(saved) ? new Set(saved.map((r) => key(r.id))) : null;
+      const dels = [];
+      for (const x of sent) {
+        if (took && !took.has(x.id)) { turnedDown.push(x.id); continue; }
+        const row = S.docs.get(x.id);
+        // Clear only what went up; anything edited meanwhile goes next time.
+        if (row && row.data.updatedAt === x.stamp) {
+          S.dirty.delete(x.id);
+          delete S.meta.recordOps[x.id]; // its edits are in Supabase now
+          if (row.deleted) { S.docs.delete(x.id); dels.push(x.id); }
+        }
+      }
+      if (dels.length) { await idb.batch('docs', [], dels); bump(); }
+      await saveMeta();
+    }
+    if (!turnedDown.length) break;
+    superseded.push(...await takeNewerCopies(token, turnedDown));
+  }
+  if (superseded.length) {
+    const names = [...new Set(superseded)];
+    toast(names.length === 1 ? `${names[0]} was changed on another device at the same time, so its newer version was kept.` : `${names.length} records were changed on another device at the same time, so their newer versions were kept.`);
+  }
+}
+
+/** A short name for a record, for messages. */
+function recordLabel(row) {
+  const d = row?.data || {};
+  if (row?.kind === 'project') return projectName(d);
+  if (row?.kind === 'transaction') return (d.payee || '').trim() || contactName(d.contactID) || 'An entry in the books';
+  return (d.name || d.title || d.payee || '').trim() || 'A record';
+}
+
+/**
+ * Supabase kept its own, newer copy of these records. Brings that copy in: edits kept as steps
+ * are made again on it (and stay queued), anything else gives way to it. Returns the names of
+ * records whose edit here gave way.
+ */
+async function takeNewerCopies(token, ids) {
+  const lost = [];
+  for (let i = 0; i < ids.length; i += 50) {
+    const chunk = ids.slice(i, i + 50);
+    const rows = await api('/rest/v1/documents', {
+      token, query: [['select', 'id,kind,deleted,data,updated_at'], ['id', `in.(${chunk.join(',')})`]],
     });
-    await api('/rest/v1/documents', {
-      method: 'POST', token,
-      headers: { 'Content-Type': 'application/json', Prefer: 'resolution=merge-duplicates,return=minimal' },
-      body: JSON.stringify(sent.map((s) => s.body)),
-    });
-    const dels = [];
-    for (const s of sent) {
-      const row = S.docs.get(s.id);
-      // Clear only what went up; anything edited meanwhile goes next time.
-      if (row && row.data.updatedAt === s.stamp) {
-        S.dirty.delete(s.id);
-        delete S.meta.recordOps[s.id]; // its edits are in Supabase now
-        if (row.deleted) { S.docs.delete(s.id); dels.push(s.id); }
+    if (!Array.isArray(rows)) continue;
+    for (const r of rows) {
+      const id = key(r.id);
+      const before = S.docs.get(id);
+      const hadSteps = !!S.meta.recordOps?.[id];
+      await applyRemote([r]);
+      const local = S.docs.get(id);
+      if (S.dirty.has(id) && local) {
+        // Still ours to send (rebased, or newer by the record's own stamp): stamp it after the
+        // copy Supabase holds, so it's taken this time.
+        const held = Date.parse(r.updated_at || '') / 1000;
+        if (Number.isFinite(held) && (Number(local.data.updatedAt) || 0) <= held) {
+          local.data.updatedAt = Math.round((held + 0.001) * 1000) / 1000;
+          await idb.set('docs', id, local);
+        }
+      } else if (before && !hadSteps) {
+        lost.push(recordLabel(before.deleted ? { kind: r.kind, data: r.data } : before));
       }
     }
-    if (dels.length) { await idb.batch('docs', [], dels); bump(); }
-    await saveMeta();
   }
+  await saveMeta();
+  return lost;
 }
 
 let syncTimer = null;

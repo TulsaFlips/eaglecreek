@@ -70,9 +70,26 @@ function ledgerTxnRow(t, { showProject = true } = {}) {
   const showPill = tracksBalance(t) || t.isVoid;
   return `<button class="row" data-act="txn-open" data-id="${esc(key(t.id))}">
     <div class="ev-time">${esc(fmt.short(fromSec(t.date)))}</div>
-    <div class="main"><div class="t ${t.isVoid ? 'done-t' : ''}">${esc(name)}</div><div class="s">${esc(sub)}</div></div>
+    <div class="main"><div class="t ${t.isVoid ? 'done-t' : ''}">${esc(name)}</div><div class="s">${esc(sub)}</div>${tagChips(t)}</div>
     <div class="end"><span class="amt">${esc(fmt.money(txnTotal(t), true))}</span>${open ? `<span>${esc(fmt.money(txnBalance(t), true))} due</span>` : ''}${showPill ? pill(TXN_STATUS[st][0], TXN_STATUS[st][1]) : ''}</div></button>`;
 }
+
+// ----- Eagle Creek Books (v1.3): tags, and money recorded in both the business and personal books
+
+const txnTags = (t) => (Array.isArray(t?.tags) ? t.tags : []).map((x) => String(x || '').trim()).filter(Boolean);
+const tagChips = (t) => { const tags = txnTags(t); return tags.length ? `<div class="tag-row">${tags.map((x) => `<span class="tag">${esc(x)}</span>`).join('')}</div>` : ''; };
+/** Every tag used in the books (or on one project's entries), A to Z. */
+function booksTags(scope = 'all') {
+  const set = new Set();
+  for (const t of booksData().transactions) if (scope === 'all' || sameId(t.projectID, scope)) for (const x of txnTags(t)) set.add(x);
+  return [...set].sort((a, b) => a.localeCompare(b));
+}
+/** Recorded in both sets of books by Eagle Creek Books' Business ↔ Personal. */
+const isPaired = (t) => !!t?.pairID;
+const PAIRED_NOTE = 'Eagle Creek Books recorded this in your personal books too. If you change the amount, how it was paid, or delete it, change the personal side in Eagle Creek Books as well.';
+/** Eagle Creek Books and the Mac app open from links in a browser on the Mac they're installed on. */
+const onMacDesktop = () => /Macintosh/.test(navigator.userAgent) && !/iPhone|iPad|iPod/.test(navigator.userAgent) && !(navigator.maxTouchPoints > 1);
+const booksAppLink = (host, value) => `eaglecreekbooks://${host}${value ? `/${/^[0-9a-f-]{36}$/i.test(value) ? String(value).toUpperCase() : value}` : ''}`;
 
 function billDueRow(t, { showProject = true } = {}) {
   const name = booksData().payeeName(t) || 'No vendor';
@@ -155,6 +172,9 @@ function booksOverview() {
   const openW = waivers.items.filter((i) => !i.isComplete);
   html += card('Lien Waivers to Collect', openW.length ? openW.slice(0, 8).map((i) => waiverRow(i)).join('') + (openW.length > 8 ? `<div class="empty-line small">${openW.length - 8} more</div>` : '')
     : allClear(waivers.items.length ? 'Every waiver is in.' : 'No payments need a lien waiver yet.'), { action: cardLink('See All', '#/books/waivers') });
+  // Eagle Creek Books (Mac, v1.3) keeps the books from these same records.
+  html += card('Eagle Creek Books', `<p class="note" style="margin:0 0 ${onMacDesktop() ? 10 : 2}px">Bank and card feeds, reconciling, 1099s and the accountant package are in Eagle Creek Books on the Mac. It works on these same records, so receipts, trip costs and drives entered here show up there.</p>
+    ${onMacDesktop() ? `<div class="btn-row"><a class="btn link-out" href="${esc(booksAppLink('banking'))}">Open Banking</a><a class="btn link-out" href="${esc(booksAppLink('section', 'taxes'))}">1099s</a></div>` : ''}`, { flush: false });
   return html;
 }
 
@@ -162,7 +182,7 @@ function booksOverview() {
 
 function txnFilter(scope) {
   S.ui.txnFilters = S.ui.txnFilters || {};
-  return (S.ui.txnFilters[scope] = S.ui.txnFilters[scope] || { type: 'all', status: 'all', preset: 'allDates', q: '', limit: 100 });
+  return (S.ui.txnFilters[scope] = S.ui.txnFilters[scope] || { type: 'all', status: 'all', preset: 'allDates', tag: '', q: '', limit: 100 });
 }
 function filteredTransactions(scope) {
   const f = txnFilter(scope);
@@ -174,15 +194,16 @@ function filteredTransactions(scope) {
   return d.transactions.filter((t) => {
     if (scope !== 'all' && !sameId(t.projectID, scope)) return false;
     if (!type[2](t.type) || !status[2](t) || !inRange(range, t.date || 0)) return false;
+    if (f.tag && !txnTags(t).includes(f.tag)) return false;
     if (!q) return true;
-    const hay = [d.payeeName(t), t.number, t.memo, TXN_TYPES[t.type], txnTotal(t).toFixed(2), ...(t.lines || []).map((l) => l.memo), ...(t.lines || []).map((l) => d.account(l.accountID)?.name), t.projectID ? projectLabel(t.projectID) : ''];
+    const hay = [d.payeeName(t), t.number, t.memo, TXN_TYPES[t.type], txnTotal(t).toFixed(2), ...(t.lines || []).map((l) => l.memo), ...(t.lines || []).map((l) => d.account(l.accountID)?.name), t.projectID ? projectLabel(t.projectID) : '', ...txnTags(t)];
     return hay.some((x) => String(x || '').toLowerCase().includes(q));
   }).sort((a, b) => (b.date || 0) - (a.date || 0) || (a.id < b.id ? -1 : 1));
 }
 function transactionResults(scope) {
   const f = txnFilter(scope);
   const list = filteredTransactions(scope);
-  const filtered = f.type !== 'all' || f.status !== 'all' || f.preset !== 'allDates' || f.q.trim();
+  const filtered = f.type !== 'all' || f.status !== 'all' || f.preset !== 'allDates' || f.tag || f.q.trim();
   if (!list.length) {
     return filtered ? emptyState('search', 'Nothing Matches', 'Try a different type, status, date range or search.', `<button class="btn" data-act="txn-clear" data-scope="${esc(scope)}">Clear Filters</button>`)
       : emptyState('bookClosed', 'No Transactions Yet', scope === 'all' ? 'Bills, expenses, deposits and invoices entered on the Mac show here.' : 'Bills, expenses, deposits and invoices for this project show here once they’re entered on the Mac.');
@@ -204,8 +225,11 @@ function transactionResults(scope) {
 function transactionList(scope) {
   const f = txnFilter(scope);
   const sel = (name, options, value) => `<select class="input" data-act="txn-filter" data-scope="${esc(scope)}" data-field="${name}">${options.map(([k, l]) => `<option value="${k}" ${k === value ? 'selected' : ''}>${esc(l)}</option>`).join('')}</select>`;
-  return `<div class="search">${icon('search')}<input class="input" id="txn-search" data-scope="${esc(scope)}" type="search" placeholder="Name, number, memo, amount" value="${esc(f.q)}" autocomplete="off"></div>
-    <div class="filters">${sel('type', TXN_TYPE_FILTERS, f.type)}${sel('status', TXN_STATUS_FILTERS, f.status)}${sel('preset', Object.entries(DATE_PRESETS), f.preset)}</div>
+  // Tags come from Eagle Creek Books (v1.3): filter by one when there are any.
+  const tags = booksTags(scope);
+  if (f.tag && !tags.includes(f.tag)) tags.push(f.tag);
+  return `<div class="search">${icon('search')}<input class="input" id="txn-search" data-scope="${esc(scope)}" type="search" placeholder="Name, number, memo, tag, amount" value="${esc(f.q)}" autocomplete="off"></div>
+    <div class="filters">${sel('type', TXN_TYPE_FILTERS, f.type)}${sel('status', TXN_STATUS_FILTERS, f.status)}${sel('preset', Object.entries(DATE_PRESETS), f.preset)}${tags.length ? sel('tag', [['', 'All tags'], ...tags.map((x) => [x, x])], f.tag || '') : ''}</div>
     <div id="txn-results">${transactionResults(scope)}</div>`;
 }
 
