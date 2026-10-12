@@ -78,14 +78,36 @@ sync (every few minutes, or **Sync Now**), and the other way round.
   matched the same way as on the Mac. Expired insurance and missing W-9s are flagged. Add or edit
   contacts and add files to them (a W-9 marks it on file; an insurance certificate can update the
   expiry date). Bills, invoices and subcontracts are view-only here.
+- **Trips & Mileage:** start a trip (destination, dates, the business purpose the IRS wants written
+  down, which projects it's for) and add every cost as you go: snap the receipt, pick what it was
+  (meals, lodging, airfare, car rental, fuel, parking), and it's filed the way the Mac files it
+  (travel to Travel – Air, Lodging & Car; meals to Business Meals, usually 50% deductible). Each
+  trip shows its total, meals, mileage, what you paid yourself and which expenses still need a
+  receipt, plus boarding passes, folios and rental agreements. It all syncs to the Mac's Trips &
+  Mileage, where the Trip Report for your accountant is made.
+- **Canadian dollars:** enter a receipt in CAD and it's turned into US dollars for the books at that
+  day's Bank of Canada rate (the European Central Bank's, through Frankfurter, if the Bank of
+  Canada can't be reached; or type the rate from your card statement). The original CA$ amount,
+  the rate and where it came from are kept on the expense.
+- **Paid with your own card or cash:** every purchase asks who paid. The company's cards and
+  accounts, or your own money, either **owed back** (Owed to Owner, as on the Mac) or **kept in as
+  your contribution** (a journal entry from Owed to Owner to Owner Contributions, so nothing is
+  owed back). Switch any personal purchase between the two later, or turn part of what the company
+  owes you into a contribution in one go (Trips › Paid Personally).
+- **Mileage in kilometres or miles:** log each drive (stored in miles for the Mac, at the IRS rate
+  per mile), then post it to the books as owed back or as your contribution.
+- **Days in the US:** counted from trips (any part of a day counts) and any other stays you add,
+  with this year's count, the last 365 days, and the weighted three-year total the IRS uses for
+  its substantial presence test. It's a count, not tax advice; your cross-border accountant can
+  tell you what applies.
 - **Receipts:** the receipt button on Projects sends a photo to Books › Receipts on the Mac.
 - **Appearance:** Light (the default, like the Mac), Dark or Match Device, in Settings (the gear
   on Projects on a phone; the bottom of the sidebar on an iPad or computer).
 - **Works offline.** Everything is saved on the device first and uploads when there's signal.
 
-Entering bills, invoices and deposits, the budget lines themselves, contract terms and the
-schedule of values, approving change orders, making pay applications, QuickBooks, bank imports
-and reconciling stay on the Mac.
+Entering bills, invoices and deposits (travel expenses and personal purchases can be entered
+here), the budget lines themselves, contract terms and the schedule of values, approving change
+orders, making pay applications, QuickBooks, bank imports and reconciling stay on the Mac.
 
 ## Plan reader
 
@@ -152,8 +174,8 @@ Mac app's Settings → Cloud Sync and run `supabase/setup.sql` in the Supabase S
 
 - Edits follow the Mac's rule: the newest edit wins. If the same punch item is changed on the
   phone and the Mac between syncs, the later change is kept.
-- Selections and draws are saved inside the project, lien waivers on the bill and change orders
-  on their own, all of which the Mac also edits. Each change made here is kept as a step until it reaches Supabase; if the
+- Selections and draws are saved inside the project, lien waivers on the bill, change orders and
+  trips on their own, all of which the Mac also edits. Each change made here is kept as a step until it reaches Supabase; if the
   record changed on the Mac in the meantime (even while the phone had no signal), the step is
   made again on the Mac's newer copy, so neither edit is lost. The one case to avoid: changing
   the same project on the Mac in the few minutes before it syncs, while selections are changed

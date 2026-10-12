@@ -462,3 +462,14 @@ details.draw-items summary { cursor: pointer; color: var(--forest); font-weight:
 .btn-row.wrap { flex-wrap: wrap; }
 .btn-row.wrap > .btn { flex: 1 1 auto; }
 a.kv { color: inherit; }
+/* ---------- Trips ---------- */
+.receipt-strip { display: grid; grid-template-columns: repeat(auto-fill, minmax(72px, 1fr)); gap: 6px; margin-bottom: 10px; border-radius: var(--radius); overflow: hidden; }
+.receipt-strip:empty { display: none; }
+.receipt-strip .thumb { border-radius: 8px; }
+.chip-check { display: inline-flex; cursor: pointer; }
+.chip-check input { position: absolute; opacity: 0; pointer-events: none; }
+.chip-check span { border: 1px solid var(--stroke); background: var(--field); border-radius: 999px; padding: 5px 11px; font-size: 13.5px; color: var(--text); }
+.chip-check input:checked + span { background: var(--forest); color: var(--on-accent); border-color: var(--forest); }
+.chip-check input:focus-visible + span { outline: 2px solid color-mix(in srgb, var(--forest) 55%, transparent); }
+.page-bar .count.small { flex: 1; min-width: 0; }
+

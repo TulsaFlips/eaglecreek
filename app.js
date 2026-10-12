@@ -6,14 +6,15 @@
  */
 'use strict';
 
-const APP_VERSION = '1.6.0';
+const APP_VERSION = '1.7.0';
 // The record kinds kept on this device. QuickBooks, bank imports and the rest stay on the Mac.
 // planSheet and planMark are the plan reader's scales and measurements (plans.js); the Mac app
 // leaves kinds it doesn't know alone.
 // books (the chart of accounts), transaction, commitment, changeOrder, payApp and timeEntry are
 // read for Contacts, the budget and the money pages; they're edited on the Mac.
+// trip and mileage are the Mac's Trips & Mileage; usStay (days in the US) is kept for the phone.
 const KINDS = ['project', 'file', 'task', 'dailyLog', 'punchItem', 'event', 'contact', 'company', 'planSheet', 'planMark',
-  'transaction', 'commitment', 'changeOrder', 'payApp', 'timeEntry', 'books'];
+  'transaction', 'commitment', 'changeOrder', 'payApp', 'timeEntry', 'books', 'trip', 'mileage', 'usStay'];
 const KINDS_KEY = KINDS.join(',');
 const UPLOAD_LIMIT = 50_000_000; // Supabase's free plan, same as the Mac
 
@@ -1199,6 +1200,7 @@ const TABS = [
   ['projects', 'Projects', 'folder', 'var(--forest)'],
   ['schedule', 'Schedule', 'schedule', 'var(--gold)'],
   ['calendar', 'Calendar', 'calendar', 'var(--clay)'],
+  ['trips', 'Trips', 'airplane', 'var(--slate)'],
   ['books', 'Books', 'bookClosed', 'var(--spruce)'],
   ['contacts', 'Contacts', 'people', 'var(--walnut)'],
   // On a phone, Settings is the gear on Projects; the sidebar lists it.
@@ -1237,6 +1239,8 @@ function render() {
       case 'contact': html = viewContact(r.a); tab = 'contacts'; break;
       case 'settings': html = viewSettings(); break;
       case 'books': html = viewBooks(r.a || 'overview', r.b); break;
+      case 'trips': html = viewTrips(r.a || 'list'); break;
+      case 'trip': html = viewTrip(r.a); tab = 'trips'; break;
       default: html = viewProjects(); tab = 'projects';
     }
   } catch (e) {

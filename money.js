@@ -135,9 +135,9 @@ function booksOverview() {
     ${tile('Profit This Year', fmt.money(profit), 'Includes costs on houses not sold yet', { accent: 'var(--gold)', tint: profitTint(profit) })}
   </div>`;
   const notes = [];
-  if (loans > 0.005) notes.push(`Loans owed: ${fmt.money(loans)}`);
-  if (owedToOwner > 0.005) notes.push(`The company owes you ${fmt.money(owedToOwner, true)}`);
-  if (notes.length) html += `<p class="note" style="margin:-4px 4px 14px">${esc(notes.join(' · '))}</p>`;
+  if (loans > 0.005) notes.push(esc(`Loans owed: ${fmt.money(loans)}`));
+  if (owedToOwner > 0.005) notes.push(`<a href="#/trips/personal">The company owes you ${esc(fmt.money(owedToOwner, true))}</a>`);
+  if (notes.length) html += `<p class="note" style="margin:-4px 4px 14px">${notes.join(' · ')}</p>`;
   const cash = cashByMonth(6);
   const last = cash[cash.length - 1];
   html += card('Money In and Out', cash.every((r) => !r.moneyIn && !r.moneyOut) ? '<div class="empty-line">The last six months show here once money moves.</div>'

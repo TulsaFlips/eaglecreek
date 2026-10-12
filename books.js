@@ -149,6 +149,8 @@ function booksSettings() {
     accounts,
     defaultBankAccountID: rec ? (rec.defaultBankAccountID ?? null) : chartID('1000'),
     lienWaiverThreshold: Number(rec?.lienWaiverThreshold) || 0,
+    mileageRates: Array.isArray(rec?.mileageRates) ? rec.mileageRates : [],
+    deletedMileageRateIDs: Array.isArray(rec?.deletedMileageRateIDs) ? rec.deletedMileageRateIDs : [],
     invoiceDueDays: rec?.invoiceDueDays ?? 15,
     closedThrough: rec?.closedThrough ?? null,
     reconciliations: rec?.reconciliations || [],
