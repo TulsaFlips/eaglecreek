@@ -206,9 +206,9 @@ function sheetChangeOrder(id, draft = null) {
       <p class="note" style="margin:0 4px 12px">${st === 'approved' ? 'Approved: it’s on the contract and the budget. Change or take it back on the Mac.' : 'Rejected. Put it back to draft to rework it.'}</p>`;
   }
   const actions = [];
-  if (!draft && st === 'draft') actions.push(`<button type="button" class="btn" data-act="co-status" data-status="pending">Mark Sent to Client</button>`);
-  if (!draft && st === 'pending') actions.push(`<button type="button" class="btn" data-act="co-status" data-status="rejected">Mark Rejected</button>`, `<button type="button" class="btn" data-act="co-status" data-status="draft">Back to Draft</button>`);
-  if (!draft && st === 'rejected') actions.push(`<button type="button" class="btn" data-act="co-status" data-status="draft">Back to Draft</button>`);
+  if (!draft && st === 'draft') actions.push(`<button type="button" class="btn" data-act="co-status" data-status="pending">${icon('share')}Mark Sent to Client</button>`);
+  if (!draft && st === 'pending') actions.push(`<button type="button" class="btn" data-act="co-status" data-status="rejected">${icon('close')}Mark Rejected</button>`, `<button type="button" class="btn" data-act="co-status" data-status="draft">${icon('undo')}Back to Draft</button>`);
+  if (!draft && st === 'rejected') actions.push(`<button type="button" class="btn" data-act="co-status" data-status="draft">${icon('undo')}Back to Draft</button>`);
   openSheet(`${sheetHead(draft ? `New Change Order (${coLabel(o)})` : coTitle(o), p ? projectName(p) : '')}
     <form id="co-form" data-id="${esc(draft ? '' : key(o.id))}">
       <div class="page-bar">${pill(CO_STATUS[st][0], CO_STATUS[st][1])}${st === 'pending' || st === 'draft' ? '<span class="count small">Approve it on the Mac</span>' : ''}</div>

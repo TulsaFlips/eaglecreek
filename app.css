@@ -165,8 +165,8 @@ nav.tabs a.on .ic { opacity: 1; }
 .row.static:active { background: none; }
 .group-toggle { display: flex; align-items: center; justify-content: space-between; width: 100%; background: none; border: 0; padding: 4px 2px; margin: 4px 0 8px; cursor: pointer; color: var(--text); }
 .group-toggle h2 { font-size: 17px; }
-.group-toggle .ic { color: var(--muted); width: 18px; height: 18px; transition: transform .15s; }
-.group-toggle.open .ic { transform: rotate(90deg); }
+.group-toggle > .ic { color: var(--muted); width: 18px; height: 18px; transition: transform .15s; }
+.group-toggle.open > .ic { transform: rotate(90deg); }
 .page-bar { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin: 0 2px 10px; min-height: 34px; }
 .page-bar .count { color: var(--muted); font-size: 15px; }
 .check-label { display: inline-flex; align-items: center; gap: 7px; font-size: 15px; color: var(--text); cursor: pointer; }
@@ -480,3 +480,18 @@ a.kv { color: inherit; }
 .kv .tag-row { justify-content: flex-end; margin-top: 0; }
 .kv .tag { color: var(--olive); font-size: 12.5px; }
 .link-out { display: inline-flex; align-items: center; gap: 6px; }
+
+/* Icons beside card titles, tile labels, section pills and chips (icons.js) */
+.card-head h2 .head-ic, .group-toggle h2 .head-ic { width: 18px; height: 18px; vertical-align: -3px; margin-right: 8px; color: var(--gold); }
+.tile { container-type: inline-size; }
+.tile .tt { display: flow-root; }
+.tile .tile-ic { float: right; width: 17px; height: 17px; margin: 0 -2px 2px 6px; color: var(--a); opacity: .78; }
+.tiles.aging .tile-ic { display: none; }
+/* Too narrow (three across on a phone): the label needs the room more than the icon. */
+@container (max-width: 120px) { .tile .tile-ic { display: none; } }
+.seg a, .seg button { display: inline-flex; align-items: center; gap: 6px; }
+.seg .seg-ic { width: 16px; height: 16px; opacity: .72; }
+.seg .on .seg-ic { opacity: 1; }
+.chips .chip-ic { width: 15px; height: 15px; vertical-align: -3px; margin-right: 5px; }
+.fs-title { display: inline-flex; align-items: center; gap: 6px; }
+.fs-head .fs-ic { width: 16px; height: 16px; color: var(--gold); }

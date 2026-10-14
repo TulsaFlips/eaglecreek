@@ -103,6 +103,9 @@ sync (every few minutes, or **Sync Now**), and the other way round.
 - **Receipts:** the receipt button on Projects sends a photo to Books › Receipts on the Mac.
 - **Appearance:** Light (the default, like the Mac), Dark or Match Device, in Settings (the gear
   on Projects on a phone; the bottom of the sidebar on an iPad or computer).
+- **Icons** in the same line style as the Mac's: on section pills, card titles and dashboard
+  figures, by trade (plumbing, electrical, roofing…) on budget lines, selections, tasks and trades,
+  by kind on documents, accounts and travel expenses, and by weather on daily logs.
 - **Works offline.** Everything is saved on the device first and uploads when there's signal.
 
 Entering bills, invoices and deposits (travel expenses and personal purchases can be entered

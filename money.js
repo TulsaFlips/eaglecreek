@@ -127,7 +127,7 @@ function viewBooks(page, arg) {
   if (!BOOKS_PAGES.some(([k]) => k === page)) page = 'overview';
   const closed = booksData().settings.closedThrough;
   setHeader({ title: 'Books', sub: closed != null ? `Closed through ${fmt.date(fromSec(closed))}` : '' });
-  const nav = `<nav class="seg" aria-label="Books pages">${BOOKS_PAGES.map(([k, l]) => `<a href="#/books/${k}" class="${k === page ? 'on' : ''}">${l}</a>`).join('')}</nav>`;
+  const nav = `<nav class="seg" aria-label="Books pages">${BOOKS_PAGES.map(([k, l]) => `<a href="#/books/${k}" class="${k === page ? 'on' : ''}">${segIcon(SECTION_ICONS[`books:${k}`] || SECTION_ICONS[k])}${l}</a>`).join('')}</nav>`;
   let html = S.syncError ? banner(S.syncError) : '';
   if (!all('transaction').length && !all('books').length) {
     html += S.meta.lastSync ? '' : emptyState('bookClosed', 'Getting Your Books', 'Downloading from Supabase…');
@@ -163,7 +163,7 @@ function booksOverview() {
   html += card('Bank and Card Accounts', moneyAccounts.length ? moneyAccounts.map((a) => {
     const recs = (d.settings.reconciliations || []).filter((r) => sameId(r.accountID, a.id)).sort((x, y) => (y.statementDate || 0) - (x.statementDate || 0));
     const b = accountBalance(a.id);
-    return `<a class="row" href="#/books/account/${esc(key(a.id))}"><div class="main"><div class="t">${esc(a.name || 'Unnamed account')}</div><div class="s">${esc(recs[0] ? `Reconciled through ${fmt.short(fromSec(recs[0].statementDate))}` : 'Not reconciled yet')}</div></div>
+    return `<a class="row" href="#/books/account/${esc(key(a.id))}">${icon(ACCOUNT_ICONS[a.type] || 'bank', 'ic glyph', '--tint:var(--forest)')}<div class="main"><div class="t">${esc(a.name || 'Unnamed account')}</div><div class="s">${esc(recs[0] ? `Reconciled through ${fmt.short(fromSec(recs[0].statementDate))}` : 'Not reconciled yet')}</div></div>
       <div class="end"><span class="amt" style="${b < 0 ? 'color:var(--danger)' : ''}">${esc(fmt.money(b, true))}</span></div>${icon('chev', 'ic chev')}</a>`;
   }).join('') : '<div class="empty-line">No bank or card accounts yet.</div>', { action: cardLink('All Accounts', '#/books/accounts') });
   html += card('Bills to Pay', bills.length ? bills.slice(0, 8).map((t) => billDueRow(t)).join('') + (bills.length > 8 ? `<div class="empty-line small">${bills.length - 8} more</div>` : '') : allClear('No unpaid bills.'),
@@ -317,6 +317,7 @@ function accountsPage() {
       .filter(({ a, v }) => !a.isArchived || showArchived || Math.abs(v) >= 0.005);
     if (!rows.length) continue;
     html += card(`${SECTION_LABEL[section]}${balanceSheet ? '' : ' (this year)'}`, rows.map(({ a, v }) => `<a class="row" href="#/books/account/${esc(key(a.id))}">
+      ${icon(ACCOUNT_ICONS[a.type] || 'bookClosed', 'ic glyph', `--tint:${ACCOUNT_SECTION_TINTS[section] || 'var(--clay)'}`)}
       <div class="main"><div class="t">${esc(accountDisplayName(a))}${a.isArchived ? ' <span class="muted small">· Archived</span>' : ''}</div><div class="s">${esc(ACCOUNT_TYPE_LABEL[a.type])}${a.costGroup && a.type === 'jobCost' ? ` · ${esc(COST_GROUPS[a.costGroup])}` : ''}</div></div>
       <div class="end"><span class="amt" style="${v < -0.004 ? 'color:var(--danger)' : ''}">${esc(fmt.money(v, true))}</span></div>${icon('chev', 'ic chev')}</a>`).join(''));
   }
@@ -585,7 +586,7 @@ function projectDraws(p) {
     if (files.length) body += `<div class="grid draw-files" style="margin:4px 16px 10px">${files.map((f) => thumbCell(f, `draw:${key(line.id)}`)).join('')}</div>`;
     body += `<details class="draw-items"><summary>${plural(line.items.length, 'budget item')} in this draw</summary>${line.items.length ? line.items.map((b) => `<div class="kv"><span>${esc((b.name || '').trim() || 'Untitled')} <span class="muted small">${esc(b.category ?? '')}</span></span><span>${esc(fmt.money(budgetItemTotal(b)))}</span></div>`).join('') + (line.contingency > 0.5 ? `<div class="kv"><span class="muted">Contingency allocation</span><span>${esc(fmt.money(line.contingency))}</span></div>` : '') : '<p class="note">No budget items assigned.</p>'}</details>`;
     body += `<div class="btn-row" style="padding:0 16px 14px"><button class="btn sm" data-act="draw-edit" data-project="${esc(key(p.id))}" data-id="${esc(key(line.id))}">${icon('edit')}Update</button><button class="btn sm" data-act="draw-attach" data-project="${esc(key(p.id))}" data-id="${esc(key(line.id))}">${icon('camera')}Add Photos</button></div>`;
-    html += `<section class="card flush"><div class="card-head"><h2>${esc(line.title)}</h2>${pill(st[0], st[1])}</div>${body}</section>`;
+    html += `<section class="card flush"><div class="card-head"><h2>${icon('banknote', 'ic head-ic')}${esc(line.title)}</h2>${pill(st[0], st[1])}</div>${body}</section>`;
   });
   if (deal.unassignedItems.length) html += `<p class="note" style="margin:0 4px 14px">${plural(deal.unassignedItems.length, 'budget line')} ${deal.unassignedItems.length === 1 ? "isn't" : "aren't"} in a draw yet.</p>`;
   return html;

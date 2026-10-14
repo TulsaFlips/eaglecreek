@@ -6,7 +6,7 @@
  */
 'use strict';
 
-const APP_VERSION = '1.8.0';
+const APP_VERSION = '1.9.0';
 // The record kinds kept on this device. QuickBooks, bank imports and the rest stay on the Mac.
 // planSheet and planMark are the plan reader's scales and measurements (plans.js); the Mac app
 // leaves kinds it doesn't know alone.
@@ -1353,13 +1353,20 @@ function autoGrow(t) {
 // ----- Building blocks (the Mac's Card, StatusPill, MetricTile, ContentUnavailableView)
 
 const pill = (label, color) => `<span class="pill" style="--c:${color}">${esc(label)}</span>`;
-const banner = (text, color = 'var(--warning)') => `<div class="banner" style="--c:${color}">${icon('warn')}<div>${esc(text)}</div></div>`;
-function card(title, body, { action = '', flush = true } = {}) {
-  return `<section class="card ${flush ? 'flush' : ''}"><div class="card-head"><h2>${esc(title)}</h2>${action}</div>${body}</section>`;
+/** A notice: a warning triangle for problems, an info mark for news, a check for good news. */
+function banner(text, color = 'var(--warning)', ic = null) {
+  const name = ic || (/danger|warning|clay/.test(color) ? 'warn' : /success/.test(color) ? 'checkCircle' : 'info');
+  return `<div class="banner" style="--c:${color}">${icon(name)}<div>${esc(text)}</div></div>`;
+}
+/** A titled card. Its icon comes from the title (icons.js), or pass `icon` (false for none). */
+function card(title, body, { action = '', flush = true, icon: ic = null } = {}) {
+  const name = ic === false ? '' : (ic || cardIcon(title));
+  return `<section class="card ${flush ? 'flush' : ''}"><div class="card-head"><h2>${name ? icon(name, 'ic head-ic') : ''}${esc(title)}</h2>${action}</div>${body}</section>`;
 }
 const cardLink = (label, href) => `<a class="btn link" href="${esc(href)}">${esc(label)}</a>`;
-function tile(title, value, detail = '', { accent = 'var(--gold)', progress = null, tint = '' } = {}) {
-  return `<div class="tile" style="--a:${accent}"><div class="tt">${esc(title)}</div><div class="tv"${tint ? ` style="color:${tint}"` : ''}>${esc(value)}</div>${progress != null ? `<div class="progress"><i style="width:${Math.round(progress * 100)}%"></i></div>` : ''}${detail ? `<div class="td">${esc(detail)}</div>` : ''}</div>`;
+function tile(title, value, detail = '', { accent = 'var(--gold)', progress = null, tint = '', icon: ic = null } = {}) {
+  const name = ic === false ? '' : (ic || tileIcon(title));
+  return `<div class="tile" style="--a:${accent}"><div class="tt">${name ? icon(name, 'ic tile-ic') : ''}${esc(title)}</div><div class="tv"${tint ? ` style="color:${tint}"` : ''}>${esc(value)}</div>${progress != null ? `<div class="progress"><i style="width:${Math.round(progress * 100)}%"></i></div>` : ''}${detail ? `<div class="td">${esc(detail)}</div>` : ''}</div>`;
 }
 function emptyState(ic, title, text, action = '') {
   return `<div class="empty">${icon(ic)}<div class="et">${esc(title)}</div>${text ? `<div class="ed">${esc(text)}</div>` : ''}${action}</div>`;
@@ -1378,11 +1385,11 @@ function viewWelcome() {
     <p class="lede">Your projects in the field: photos, daily logs, punch lists and the schedule, synced with the Mac app.</p>
     ${homeHint}
     <form id="signin" autocomplete="on">
-      <div class="form-section"><div class="fs-head">Supabase project</div><div class="form-card">
+      <div class="form-section"><div class="fs-head">${fsTitle('link', 'Supabase project')}</div><div class="form-card">
         <label class="field"><span>Project URL, or paste a setup link</span><input name="url" type="url" inputmode="url" placeholder="https://xxxx.supabase.co" value="${esc(c.url || '')}" required autocapitalize="off" autocorrect="off" spellcheck="false"></label>
         <label class="field"><span>Anon or publishable key</span><input name="key" placeholder="eyJ… or sb_publishable_…" value="${esc(c.key || '')}" required autocapitalize="off" autocorrect="off" spellcheck="false"></label>
       </div></div>
-      <div class="form-section"><div class="fs-head">Your account</div><div class="form-card">
+      <div class="form-section"><div class="fs-head">${fsTitle('person', 'Your account')}</div><div class="form-card">
         <label class="field"><span>Email</span><input name="email" type="email" autocomplete="username" required autocapitalize="off" value="${esc(S.lastEmail || '')}"></label>
         <label class="field"><span>Password</span><input name="password" type="password" autocomplete="current-password" required></label>
       </div></div>
@@ -1458,14 +1465,14 @@ function projectResults() {
   for (const p of list) groups[statusGroup(p.status)].push(p);
   let html = '';
   if (!q || groups.active.length) {
-    html += card('Active Projects', groups.active.length ? groups.active.map(projectRow).join('') : '<div class="empty-line">No active projects</div>');
+    html += card('Active Projects', groups.active.length ? groups.active.map(projectRow).join('') : '<div class="empty-line">No active projects</div>', { icon: GROUP_ICONS.active });
   }
   const folding = [['pipeline', 'Pipeline', true], ['rentals', 'Rentals', true], ['closed', 'Closed', false]];
   for (const [g, title, openByDefault] of folding) {
     const arr = groups[g];
     if (!arr.length) continue;
     const open = q ? true : prefs.get(`show-${g}`, openByDefault);
-    html += `<button class="group-toggle ${open ? 'open' : ''}" data-act="toggle-group" data-group="${g}" aria-expanded="${open}"><h2>${title} (${arr.length})</h2>${icon('chev')}</button>`;
+    html += `<button class="group-toggle ${open ? 'open' : ''}" data-act="toggle-group" data-group="${g}" aria-expanded="${open}"><h2>${icon(GROUP_ICONS[g], 'ic head-ic')}${title} (${arr.length})</h2>${icon('chev')}</button>`;
     if (open) html += `<section class="card flush">${arr.map(projectRow).join('')}</section>`;
   }
   return html;
@@ -1516,7 +1523,7 @@ function viewProject(id, page) {
   if (!section.pages.includes(page)) page = section.pages[0];
   prefs.set(`page-${section.id}`, page);
   const lastPage = (s) => { const last = prefs.get(`page-${s.id}`, s.pages[0]); return s.pages.includes(last) ? last : s.pages[0]; };
-  let nav = `<nav class="seg" aria-label="Project sections">${sections.map((s) => `<a href="#/project/${pid}/${lastPage(s)}" class="${s === section ? 'on' : ''}">${s.title}</a>`).join('')}</nav>`;
+  let nav = `<nav class="seg" aria-label="Project sections">${sections.map((s) => `<a href="#/project/${pid}/${lastPage(s)}" class="${s === section ? 'on' : ''}">${segIcon(SECTION_ICONS[s.id])}${s.title}</a>`).join('')}</nav>`;
   if (section.pages.length > 1) nav += `<nav class="seg sub" aria-label="${esc(section.title)} pages">${section.pages.map((pg) => `<a href="#/project/${pid}/${pg}" class="${pg === page ? 'on' : ''}">${esc(pageTitle(pg, p))}</a>`).join('')}</nav>`;
   return nav + PROJECT_PAGES[page][1](p);
 }
@@ -1587,8 +1594,9 @@ function taskRow(s, { showProject = false } = {}) {
   const sub = [p ? projectName(p) : t.phase, contactName(t.contactID)].filter(Boolean).join(' · ');
   const late = isLate(s) && ws !== 'done';
   const tint = ws === 'stuck' || late ? 'var(--danger)' : isMilestone(t) ? 'var(--gold)' : WORK[ws][1];
+  const glyph = isMilestone(t) ? 'flag' : tradeIcon(`${t.name || ''} ${t.phase || ''} ${get(t.contactID)?.trade || ''}`, 'hammer');
   return `<button class="row" data-act="task" data-id="${esc(key(t.id))}">
-    ${icon(isMilestone(t) ? 'flag' : 'hammer', 'ic glyph', `--tint:${tint}`)}
+    ${icon(glyph, 'ic glyph', `--tint:${tint}`)}
     <div class="main"><div class="t ${ws === 'done' ? 'done-t' : ''}">${esc(t.name || 'Task')}</div>
       <div class="s">${esc(sub ? `${sub} · ${dates}` : dates)}</div>
       ${late ? `<div class="s alert">${PROGRESS[s.progress]}</div>` : ''}</div>
@@ -1613,7 +1621,9 @@ function logRow(l) {
   const photos = filesFor('recordID', l.id).length;
   const line = (l.workPerformed || '').trim() ? l.workPerformed.trim().split('\n')[0] : (l.weather || 'No notes yet');
   const rel = fmt.relDay(d);
-  const marks = (l.weatherDelay ? icon('rain', 'ic', 'width:16px;height:16px;color:var(--warning)') : '') + ((l.issues || '').trim() ? icon('warn', 'ic', 'width:16px;height:16px;color:var(--warning)') : '');
+  // The day's weather (amber when it held work up), and a warning when there were problems.
+  const wx = (l.weather || '').trim() ? weatherIcon(l.weather) : l.weatherDelay ? 'rain' : '';
+  const marks = (wx ? icon(wx, 'ic', `width:16px;height:16px;color:${l.weatherDelay ? 'var(--warning)' : 'var(--muted)'}`) : '') + ((l.issues || '').trim() ? icon('warn', 'ic', 'width:16px;height:16px;color:var(--warning)') : '');
   return `<a class="row" href="#/log/${esc(key(l.id))}">
     ${icon('book', 'ic glyph')}
     <div class="main"><div class="t">${esc(fmt.weekday(d))}${rel === 'Today' || rel === 'Yesterday' ? ` <span class="muted small">· ${rel}</span>` : ''}</div>
@@ -1626,9 +1636,9 @@ function projectLogs(p) {
   const logs = all('dailyLog').filter((l) => sameId(l.projectID, p.id)).sort((a, b) => b.date - a.date);
   const todayBtn = `<button class="btn primary sm" data-act="today-log" data-project="${pid}">${icon('plus')}Today</button>`;
   if (!logs.length) {
-    return emptyState('book', 'No Daily Logs', 'A short note each day protects you on delays, disputes and draws. Tap Today to start.', `<div class="btn-row" style="justify-content:center;margin-top:14px">${todayBtn}<button class="btn sm" data-act="log-other-day" data-project="${pid}">Another Day…</button></div>`);
+    return emptyState('book', 'No Daily Logs', 'A short note each day protects you on delays, disputes and draws. Tap Today to start.', `<div class="btn-row" style="justify-content:center;margin-top:14px">${todayBtn}<button class="btn sm" data-act="log-other-day" data-project="${pid}">${icon('calendar')}Another Day…</button></div>`);
   }
-  return `<div class="page-bar"><span class="count">${plural(logs.length, 'log')}</span><span style="display:flex;gap:8px"><button class="btn sm" data-act="log-other-day" data-project="${pid}">Another Day…</button>${todayBtn}</span></div>
+  return `<div class="page-bar"><span class="count">${plural(logs.length, 'log')}</span><span style="display:flex;gap:8px"><button class="btn sm" data-act="log-other-day" data-project="${pid}">${icon('calendar')}Another Day…</button>${todayBtn}</span></div>
     <section class="card flush">${logs.map(logRow).join('')}</section>`;
 }
 
@@ -1712,7 +1722,7 @@ function projectDocuments(p) {
     const arr = by.get(c);
     if (!arr) continue;
     const open = S.ui.filesOpen[c] ?? c === 'plansSpecs';
-    html += `<button class="row" data-act="toggle-files" data-cat="${esc(c)}" aria-expanded="${open}">${icon('folder', 'ic glyph', '--tint:var(--sage)')}
+    html += `<button class="row" data-act="toggle-files" data-cat="${esc(c)}" aria-expanded="${open}">${icon(FILE_ICONS[c] || 'folder', 'ic glyph', '--tint:var(--sage)')}
       <div class="main"><div class="t">${esc(CATEGORY[c] || c)}</div></div><span class="end num">${arr.length}</span>
       ${icon('chev', 'ic chev', `transform:rotate(${open ? 90 : 0}deg)`)}</button>`;
     if (open) html += arr.sort((a, b) => (b.documentDate || 0) - (a.documentDate || 0)).map(fileRow).join('');
@@ -1750,34 +1760,34 @@ function viewLog(id) {
     <div class="form-section"><div class="form-card">
       <label class="field"><span>Date</span><input name="date" type="date" value="${fmt.inputDate(d)}" max="${fmt.inputDate(addDays(new Date(), 7))}"></label>
     </div></div>
-    <div class="form-section"><div class="fs-head">Weather<button type="button" class="btn link" data-act="fill-weather">${icon('sun')}Fill In</button></div><div class="form-card">
+    <div class="form-section"><div class="fs-head">${fsTitle('cloudSun', 'Weather')}<button type="button" class="btn link" data-act="fill-weather">${icon('sun')}Fill In</button></div><div class="form-card">
       <label class="field"><span>Conditions</span><input name="weather" value="${esc(l.weather || '')}" placeholder="Sunny"></label>
-      <div class="chips">${WEATHER_CHOICES.map((w) => `<button type="button" data-act="weather-pick" data-w="${esc(w)}" class="${(l.weather || '') === w ? 'on' : ''}">${w}</button>`).join('')}</div>
+      <div class="chips">${WEATHER_CHOICES.map((w) => `<button type="button" data-act="weather-pick" data-w="${esc(w)}" class="${(l.weather || '') === w ? 'on' : ''}">${icon(weatherIcon(w), 'ic chip-ic')}${w}</button>`).join('')}</div>
       <div class="two">
         <label class="field"><span>High °F</span><input name="highTemp" type="number" inputmode="decimal" value="${l.highTemp ?? ''}"></label>
         <label class="field"><span>Low °F</span><input name="lowTemp" type="number" inputmode="decimal" value="${l.lowTemp ?? ''}"></label>
       </div>
       <label class="toggle">Weather delay (work stopped or slowed)<input type="checkbox" name="weatherDelay" ${l.weatherDelay ? 'checked' : ''}></label>
     </div></div>
-    <div class="form-section"><div class="fs-head">Crews on Site<button type="button" class="btn link" data-act="crew-add">${icon('plus')}Add Crew</button></div>
+    <div class="form-section"><div class="fs-head">${fsTitle('hardhat', 'Crews on Site')}<button type="button" class="btn link" data-act="crew-add">${icon('plus')}Add Crew</button></div>
       <div class="form-card">${crews || '<div class="empty-line" style="padding:2px 0 12px">No crews listed.</div>'}</div></div>
-    <div class="form-section"><div class="fs-head">Work Performed</div><div class="form-card">
+    <div class="form-section"><div class="fs-head">${fsTitle('hammer', 'Work Performed')}</div><div class="form-card">
       <label class="field"><span class="sr">Work performed</span><textarea name="workPerformed" placeholder="What got done today" rows="3" data-min="96">${esc(l.workPerformed || '')}</textarea></label>
     </div></div>
-    <div class="form-section"><div class="fs-head">Deliveries and Inspections</div><div class="form-card">
+    <div class="form-section"><div class="fs-head">${fsTitle('truck', 'Deliveries and Inspections')}</div><div class="form-card">
       ${area('deliveries', 'Deliveries', 'Lumber package, windows…')}
       ${area('inspections', 'Inspections', 'Framing inspection – passed')}
       ${area('visitors', 'Visitors', 'Owner walk-through, lender inspector…')}
     </div></div>
-    <div class="form-section"><div class="fs-head">Problems, Delays and Safety</div><div class="form-card">
+    <div class="form-section"><div class="fs-head">${fsTitle('warn', 'Problems, Delays and Safety')}</div><div class="form-card">
       ${area('issues', 'Problems or delays', 'Anything that held up work or needs follow-up')}
       ${area('safety', 'Safety', 'Toolbox talk, incidents, near misses')}
     </div></div>
-    <div class="form-section"><div class="fs-head">Notes</div><div class="form-card">
+    <div class="form-section"><div class="fs-head">${fsTitle('note', 'Notes')}</div><div class="form-card">
       ${area('notes', 'Notes', 'Anything else')}
       <label class="field"><span>Written by</span><input name="author" value="${esc(l.author || '')}"></label>
     </div></div>
-    <div class="form-section"><div class="fs-head">Photos (${photos.length})</div>
+    <div class="form-section"><div class="fs-head">${fsTitle('camera', `Photos (${photos.length})`)}</div>
       <div class="btn-row" style="margin-bottom:8px">
         <button type="button" class="btn primary" data-act="photo" data-project="${esc(key(l.projectID))}" data-record="${lid}" data-capture="1">${icon('camera')}Camera</button>
         <button type="button" class="btn" data-act="photo" data-project="${esc(key(l.projectID))}" data-record="${lid}">${icon('image')}Library</button>
@@ -1988,7 +1998,7 @@ function viewSettings() {
   if (!isStandalone()) {
     const how = isIOS
       ? 'In Safari, tap <b>Share</b>, then <b>Add to Home Screen</b>. Open Eagle Creek from the Home Screen and sign in there; it keeps its own sign-in, separate from Safari.'
-      : deferredInstall ? '<button class="btn primary block" data-act="install">Install Eagle Creek</button>'
+      : deferredInstall ? `<button class="btn primary block" data-act="install">${icon('download')}Install Eagle Creek</button>`
         : 'In Chrome, open the <b>⋮</b> menu and choose <b>Add to Home screen</b> (Android) or <b>Cast, save and share → Install page as app</b> (computer).';
     html += card('Add to Home Screen', `<div style="padding:0 16px 14px;font-size:15px">${how}</div>`);
   }
@@ -1999,9 +2009,9 @@ function viewSettings() {
     <p class="note">Makes a link with your Supabase URL and key. On the other phone or iPad, paste it into the first box on the sign-in screen, then sign in with your email and password.</p>
   </div>`);
   html += card('This Device', `<div style="padding:0 16px 14px">
-    <div class="btn-row"><button class="btn" data-act="clear-cache">Free Up Space</button><button class="btn" data-act="full-sync">Download Everything</button></div>
+    <div class="btn-row wrap"><button class="btn" data-act="clear-cache">${icon('trash')}Free Up Space</button><button class="btn" data-act="full-sync">${icon('download')}Download Everything</button></div>
     <p class="note">Free Up Space removes downloaded copies of photos and documents; they download again when opened. Nothing waiting to upload is touched.</p>
-    <button class="btn block danger" data-act="sign-out" style="margin-top:10px">Sign Out…</button>
+    <button class="btn block danger" data-act="sign-out" style="margin-top:10px">${icon('logout')}Sign Out…</button>
   </div>`);
   html += `<p class="small muted" style="text-align:center;margin-top:6px">Eagle Creek for phone and iPad · ${APP_VERSION}</p>`;
   return html;

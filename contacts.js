@@ -16,7 +16,7 @@ Object.assign(ICONS, {
   mail: '<rect x="3" y="5" width="18" height="14" rx="2"/><path d="m4 7 8 6 8-6"/>',
   shield: '<path d="M12 3 4.5 6v5.5c0 4.5 3.2 8.2 7.5 9.5 4.3-1.3 7.5-5 7.5-9.5V6z"/><path d="M12 8v4.5M12 15.5v.01"/>',
   bank: '<path d="M3 10h18L12 4zM5 10v8M9.5 10v8M14.5 10v8M19 10v8M3 20h18"/>',
-  wrench: '<path d="M14.5 6.5a4 4 0 0 0 5 5L12 19a2.1 2.1 0 0 1-3-3l7.5-7.5z"/><path d="M14.5 6.5 17 4l3 3-2.5 2.5"/>',
+  wrench: '<path d="M15.2 4.3a4.7 4.7 0 0 0-5.4 6.3l-6 6a2.1 2.1 0 0 0 3 3l6-6a4.7 4.7 0 0 0 6.3-5.4l-2.8 2.8-2.6-.5-.5-2.6z"/>',
   edit: '<path d="M4 20h4L19 9l-4-4L4 16z"/><path d="m13.5 6.5 4 4"/>',
 });
 
@@ -24,8 +24,8 @@ Object.assign(ICONS, {
 
 const CONTACT_KINDS = {
   vendor: { one: 'Vendor', many: 'Vendors', icon: 'wrench', tint: 'var(--leather)' },
-  customer: { one: 'Customer', many: 'Customers', icon: 'person', tint: 'var(--slate)' },
-  employee: { one: 'Crew Member', many: 'Crew', icon: 'person', tint: 'var(--forest)' },
+  customer: { one: 'Customer', many: 'Customers', icon: 'house', tint: 'var(--slate)' },
+  employee: { one: 'Crew Member', many: 'Crew', icon: 'hardhat', tint: 'var(--forest)' },
   lender: { one: 'Lender', many: 'Lenders', icon: 'bank', tint: 'var(--gold)' },
   other: { one: 'Other', many: 'Other', icon: 'people', tint: 'var(--stone)' },
 };
@@ -150,7 +150,7 @@ function contactRow(c) {
   if (ins) flags.push(`<span class="${ins.level === 'expired' ? 'alert-text' : ''}" style="${ins.level === 'soon' ? 'color:var(--warning)' : ''}">${esc(ins.text)}</span>`);
   if (needsW9(c)) flags.push('<span style="color:var(--warning)">No W-9 on file</span>');
   return `<a class="row" href="#/contact/${esc(key(c.id))}">
-    ${icon(k.icon, 'ic glyph', `--tint:${k.tint}`)}
+    ${icon(contactIcon(c), 'ic glyph', `--tint:${k.tint}`)}
     <div class="main"><div class="t">${esc(contactDisplayName(c))}${c.isArchived ? ' <span class="muted small">· Archived</span>' : ''}</div>
       ${sub ? `<div class="s">${esc(sub)}</div>` : ''}${flags.length ? `<div class="s">${flags.join(' · ')}</div>` : ''}</div>
     ${ins?.level === 'expired' ? icon('shield', 'ic', 'color:var(--danger)') : ''}${icon('chev', 'ic chev')}</a>`;
@@ -184,7 +184,7 @@ function viewContacts() {
   let html = '';
   if (flagged) html += banner(`${plural(flagged, 'trade')} ${flagged === 1 ? 'has' : 'have'} expired insurance. Get a new certificate before paying.`, 'var(--danger)');
   html += `<div class="search">${icon('search')}<input class="input" id="contact-search" type="search" placeholder="Name, trade, phone" value="${esc(S.ui.contactSearch || '')}" autocomplete="off"></div>`;
-  html += `<nav class="seg" aria-label="Show">${[['all', 'All'], ...Object.entries(CONTACT_KINDS).map(([k, v]) => [k, v.many])].map(([k, l]) => `<button data-act="contact-filter" data-kind="${k}" class="${filter === k ? 'on' : ''}">${l}</button>`).join('')}</nav>`;
+  html += `<nav class="seg" aria-label="Show">${[['all', 'All'], ...Object.entries(CONTACT_KINDS).map(([k, v]) => [k, v.many])].map(([k, l]) => `<button data-act="contact-filter" data-kind="${k}" class="${filter === k ? 'on' : ''}">${segIcon(k === 'all' ? 'people' : CONTACT_KINDS[k].icon)}${l}</button>`).join('')}</nav>`;
   html += `<div id="contact-results">${contactResults()}</div>`;
   html += `<label class="check-label" style="margin:4px 4px 0"><input type="checkbox" data-act="toggle-pref" data-pref="show-archived-contacts" ${showArchived ? 'checked' : ''}>Show archived</label>`;
   return html;
@@ -213,7 +213,7 @@ function commitmentRow(c) {
 function contactFileRow(f) {
   const p = f.projectID ? project(f.projectID) : null;
   const sub = [CATEGORY_ONE[f.category] || 'File', p ? projectName(p) : 'Company Files', fmt.date(fileDate(f))].join(' · ');
-  return `<button class="row" data-act="open-file" data-id="${esc(key(f.id))}">${icon(isImage(f) ? 'image' : 'doc', 'ic glyph', '--tint:var(--sage)')}
+  return `<button class="row" data-act="open-file" data-id="${esc(key(f.id))}">${icon(isImage(f) ? 'image' : (FILE_ICONS[f.category] || 'doc'), 'ic glyph', '--tint:var(--sage)')}
     <div class="main"><div class="t">${esc(fileTitle(f))}</div><div class="s">${esc(sub)}${isPending(f) ? ' · Waiting to upload' : ''}</div></div>${icon('chev', 'ic chev')}</button>`;
 }
 
@@ -456,11 +456,11 @@ function sheetTransaction(id) {
     <div class="page-bar">${pill(TXN_STATUS[st][0], TXN_STATUS[st][1])}<span class="count small">Edit it in the Mac app</span></div>
     ${isPaired(t) ? banner('Also in your personal books: Eagle Creek Books recorded this as money between you and the business.', 'var(--slate)') : ''}
     <section class="card"><div style="margin:-4px 0">${body}</div></section>
-    <section class="card"><div class="card-head"><h2>Amounts</h2></div><div style="margin-top:-6px">${lineHtml}</div></section>
-    ${payHtml ? `<section class="card"><div class="card-head"><h2>Payments</h2></div><div style="margin-top:-6px">${payHtml}</div></section>` : ''}
+    <section class="card"><div class="card-head"><h2>${icon('coins', 'ic head-ic')}Amounts</h2></div><div style="margin-top:-6px">${lineHtml}</div></section>
+    ${payHtml ? `<section class="card"><div class="card-head"><h2>${icon('banknote', 'ic head-ic')}Payments</h2></div><div style="margin-top:-6px">${payHtml}</div></section>` : ''}
     ${files.length ? card(`Files (${files.length})`, files.map(contactFileRow).join('')) : ''}
     ${(t.memo || '').trim() ? card('Memo', `<div style="white-space:pre-wrap">${esc(t.memo)}</div>`, { flush: false }) : ''}
-    ${onMacDesktop() ? `<div class="btn-row"><a class="btn link-out" href="${esc(`eaglecreek://transaction/${String(t.id).toUpperCase()}`)}">Open in Eagle Creek</a><a class="btn link-out" href="${esc(booksAppLink('transaction', t.id))}">Open in Eagle Creek Books</a></div>` : ''}`);
+    ${onMacDesktop() ? `<div class="btn-row"><a class="btn link-out" href="${esc(`eaglecreek://transaction/${String(t.id).toUpperCase()}`)}">${icon('share')}Open in Eagle Creek</a><a class="btn link-out" href="${esc(booksAppLink('transaction', t.id))}">${icon('bookClosed')}Open in Eagle Creek Books</a></div>` : ''}`);
 }
 
 function sheetCommitment(id) {

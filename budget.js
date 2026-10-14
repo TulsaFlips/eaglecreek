@@ -82,7 +82,7 @@ function projectBudget(p) {
   for (const c of budgetCategories(p)) {
     const lines = items.filter((b) => (b.category ?? 'General') === c);
     const subtotal = lines.reduce((s, b) => s + budgetItemTotal(b), 0);
-    html += card(c, lines.map((b) => budgetLineRow(p, b, jc)).join(''), { action: `<span class="card-total">${esc(fmt.money(subtotal))}</span>` });
+    html += card(c, lines.map((b) => budgetLineRow(p, b, jc)).join(''), { action: `<span class="card-total">${esc(fmt.money(subtotal))}</span>`, icon: tradeIcon(c, 'hammer') });
   }
   const area = livingArea(p);
   const actual = items.reduce((s, b) => s + (Number(b.actualCost) || 0), 0);
@@ -133,7 +133,7 @@ function sheetBudgetLine(projectID, itemID) {
   const sels = (p.selections || []).filter((s) => sameId(s.budgetItemID, b.id));
   openSheet(`${sheetHead((b.name || '').trim() || 'Budget Line', `${b.category ?? 'General'} · ${projectName(p)}`)}
     <section class="card"><div style="margin:-4px 0">${body}</div></section>
-    <section class="card"><div class="card-head"><h2>Spent</h2></div><div style="margin-top:-6px">${money2}</div></section>
+    <section class="card"><div class="card-head"><h2>${icon('coins', 'ic head-ic')}Spent</h2></div><div style="margin-top:-6px">${money2}</div></section>
     ${sourceRows ? card(`Bills and Expenses (${sources.length})`, sourceRows) : ''}
     ${sels.length ? card(`Selections (${sels.length})`, sels.map((s) => selectionRow(p, s, null)).join('')) : ''}
     ${(b.notes || '').trim() ? card('Notes', `<div style="white-space:pre-wrap;overflow-wrap:anywhere">${esc(b.notes)}</div>`, { flush: false }) : ''}
@@ -275,7 +275,7 @@ function projectSelections(p) {
   if (markup != null && sum.overage > 0) {
     const unbilled = Math.max(0, money(sum.overage - overageBilled(p.id)));
     html += unbilled > 0
-      ? `<div class="banner" style="--c:var(--warning)">${icon('warn')}<div>${esc(`Selections are ${fmt.money(sum.overage)} over the client's allowances; ${fmt.money(unbilled)} isn't on a change order yet.`)}${typeof overageChangeOrderFields === 'function' ? `<div style="margin-top:8px"><button class="btn sm" data-act="co-overage" data-project="${pid}">Create Change Order</button></div>` : ''}</div></div>`
+      ? `<div class="banner" style="--c:var(--warning)">${icon('warn')}<div>${esc(`Selections are ${fmt.money(sum.overage)} over the client's allowances; ${fmt.money(unbilled)} isn't on a change order yet.`)}${typeof overageChangeOrderFields === 'function' ? `<div style="margin-top:8px"><button class="btn sm" data-act="co-overage" data-project="${pid}">${icon('branch')}Create Change Order</button></div>` : ''}</div></div>`
       : `<div class="banner" style="--c:var(--success)">${icon('checkCircle')}<div>Selections are ${esc(fmt.money(sum.overage))} over the client's allowances, all on change orders.</div></div>`;
   }
   // Budget lines whose selections add up to more than the line.
@@ -290,7 +290,7 @@ function projectSelections(p) {
     const active = g.items.filter((s) => selStatus(s) !== 'notApplicable');
     const total = active.reduce((s, x) => s + selectionTotal(x), 0);
     html += card(`${g.category}`, g.items.map((s) => selectionRow(p, s, starts)).join(''),
-      { action: `<span class="card-total">${total > 0 ? esc(fmt.money(total)) : ''}<button class="icon-btn sm" data-act="sel-new" data-project="${pid}" data-cat="${esc(g.category)}" aria-label="Add to ${esc(g.category)}">${icon('plus')}</button></span>` });
+      { action: `<span class="card-total">${total > 0 ? esc(fmt.money(total)) : ''}<button class="icon-btn sm" data-act="sel-new" data-project="${pid}" data-cat="${esc(g.category)}" aria-label="Add to ${esc(g.category)}">${icon('plus')}</button></span>`, icon: tradeIcon(g.category, 'palette') });
   }
   let totals = kvRow('Selections (your cost)', fmt.money(sum.total));
   if (markup != null) {

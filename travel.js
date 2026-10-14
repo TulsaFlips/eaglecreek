@@ -271,7 +271,7 @@ const TRIP_PAGES = [['list', 'Trips'], ['mileage', 'Mileage'], ['usdays', 'Days 
 function viewTrips(page) {
   if (!TRIP_PAGES.some(([k]) => k === page)) page = 'list';
   setHeader({ title: 'Trips & Mileage', actions: `<button class="icon-btn" data-act="trip-new" aria-label="New trip" title="New trip">${icon('plus')}</button>` });
-  const nav = `<nav class="seg" aria-label="Travel pages">${TRIP_PAGES.map(([k, l]) => `<a href="#/trips/${k}" class="${k === page ? 'on' : ''}">${l}</a>`).join('')}</nav>`;
+  const nav = `<nav class="seg" aria-label="Travel pages">${TRIP_PAGES.map(([k, l]) => `<a href="#/trips/${k}" class="${k === page ? 'on' : ''}">${segIcon(SECTION_ICONS[k])}${l}</a>`).join('')}</nav>`;
   const body = { list: tripsList, mileage: mileagePage, usdays: usDaysPage, personal: personalPage }[page];
   return nav + (S.syncError ? banner(S.syncError) : '') + body();
 }
@@ -367,11 +367,19 @@ function expenseRow(t, { showTrip = false } = {}) {
   const personal = paidPersonally(t);
   const label = paidWithLabel(t);
   const color = personal ? (label === 'Contributed' ? 'var(--forest)' : 'var(--leather)') : 'var(--stone)';
-  return `<button class="row" data-act="expense-open" data-id="${esc(key(t.id))}">
+  return `<button class="row" data-act="expense-open" data-id="${esc(key(t.id))}">${icon(expenseIcon(t), 'ic glyph', `--tint:${color}`)}
     <div class="main"><div class="t">${esc((t.payee || '').trim() || d.payeeName(t) || 'No vendor')}</div>
       <div class="s">${esc([fmt.short(fromSec(t.date)), cat, trip ? tripTitle(trip) : ''].filter(Boolean).join(' · '))}</div>
       <div class="s"><span class="dot-label" style="--c:${color}">${esc(label)}</span>${noReceipt ? ' · <span style="color:var(--warning)">No receipt</span>' : ''}</div></div>
     <div class="end"><span class="amt">${esc(fmt.money(txnTotal(t), true))}</span>${cad ? `<span>${esc(`CA$${cad.cad.toFixed(2)}`)}</span>` : ''}</div></button>`;
+}
+/** What an expense was for, as an icon: the kind picked here, else its category or vendor. */
+function expenseIcon(t) {
+  const memo = ((t.lines || [])[0]?.memo || '');
+  const kind = RECEIPT_KINDS.find(([, l]) => memo.startsWith(l));
+  if (kind) return RECEIPT_KIND_ICONS[kind[0]];
+  if ((t.lines || []).some((l) => sameId(l.accountID, mealsAccountID()))) return 'forkKnife';
+  return iconMatch(`${t.payee || ''} ${booksData().payeeName(t) || ''}`, EXPENSE_VENDOR_ICONS, 'receipt');
 }
 function driveRow(m) {
   const posted = mileagePosted(m);
@@ -398,7 +406,7 @@ function mileagePage() {
     ${tile(`Claimable in ${y}`, fmt.money(thisYear.reduce((s, m) => s + mileageAmount(m), 0)), `IRS rate ${centsText(mileageRate(stamp()))}/mi`, { accent: 'var(--forest)' })}
     ${tile('Not Posted Yet', fmt.money(unposted.reduce((s, m) => s + mileageAmount(m), 0)), plural(unposted.length, 'drive'), { accent: unposted.length ? 'var(--warning)' : 'var(--olive)' })}
   </div>`;
-  if (unposted.length) html += `<div class="banner" style="--c:var(--slate)">${icon('car')}<div>${plural(unposted.length, 'drive')} ${unposted.length === 1 ? "isn't" : "aren't"} in the books yet. <div class="btn-row wrap" style="margin-top:8px"><button class="btn sm" data-act="drive-post-all" data-as="owner">Post: Pay Me Back</button>${contributionAccount() ? '<button class="btn sm" data-act="drive-post-all" data-as="contribution">Post as My Contribution</button>' : ''}</div></div></div>`;
+  if (unposted.length) html += `<div class="banner" style="--c:var(--slate)">${icon('car')}<div>${plural(unposted.length, 'drive')} ${unposted.length === 1 ? "isn't" : "aren't"} in the books yet. <div class="btn-row wrap" style="margin-top:8px"><button class="btn sm" data-act="drive-post-all" data-as="owner">${icon('wallet')}Post: Pay Me Back</button>${contributionAccount() ? `<button class="btn sm" data-act="drive-post-all" data-as="contribution">${icon('handCoin')}Post as My Contribution</button>` : ''}</div></div></div>`;
   return html + `<section class="card flush">${list.slice(0, 200).map(driveRow).join('')}</section>`;
 }
 
@@ -439,7 +447,7 @@ function usDaysPage() {
   const uncounted = allTrips().filter((t) => !stayFor(t.id));
   if (uncounted.length) {
     html += card('Trips Not Counted', uncounted.slice(0, 12).map((t) => `<div class="row static">${icon('airplane', 'ic glyph', '--tint:var(--stone)')}<div class="main"><div class="t">${esc(tripTitle(t))}</div><div class="s">${esc(tripDates(t))}</div></div>
-      <button class="btn sm" data-act="trip-count-days" data-id="${esc(key(t.id))}">Count</button></div>`).join(''));
+      <button class="btn sm" data-act="trip-count-days" data-id="${esc(key(t.id))}">${icon('check')}Count</button></div>`).join(''));
   }
   return html;
 }
@@ -555,7 +563,7 @@ function sheetExpense({ id = null, tripID = null, files = [] } = {}) {
         <div id="receipt-strip" class="receipt-strip">${receipts.map((f) => thumbCell(f, '')).join('')}</div>
         <div class="btn-row"><button type="button" class="btn" data-act="expense-receipt" data-capture="1">${icon('camera')}Camera</button><button type="button" class="btn" data-act="expense-receipt">${icon('image')}Photo or PDF</button></div></div>
       <div class="form-section"><div class="fs-head">What it was for</div>
-        <div class="chips" style="margin:0">${RECEIPT_KINDS.filter(([k]) => k !== 'materials' || projectID).map(([k, l]) => `<button type="button" data-act="expense-kind" data-kind="${k}" class="${k === kindGuess ? 'on' : ''}">${l}</button>`).join('')}</div>
+        <div class="chips" style="margin:0">${RECEIPT_KINDS.filter(([k]) => k !== 'materials' || projectID).map(([k, l]) => `<button type="button" data-act="expense-kind" data-kind="${k}" class="${k === kindGuess ? 'on' : ''}">${icon(RECEIPT_KIND_ICONS[k], 'ic chip-ic')}${l}</button>`).join('')}</div>
         <input type="hidden" name="kind" value="${esc(kindGuess)}"></div>
       <div class="form-section"><div class="form-card">
         <label class="field"><span>Vendor</span><input name="payee" value="${esc(t.payee || '')}" placeholder="Hilton Garden Inn, Delta, Enterprise…" autocomplete="off"></label>
@@ -642,7 +650,7 @@ function sheetExpenseInfo(t) {
   openSheet(`${sheetHead(d.payeeName(t) || 'Expense', t.tripID && get(t.tripID) ? tripTitle(get(t.tripID)) : '')}
     <section class="card"><div style="margin:-4px 0">${body}</div></section>
     ${personal && contributionAccount() ? `<div class="form-section"><div class="fs-head">Paid personally</div><div class="segmented">${[['owner', 'Company pays me back'], ['contribution', 'My contribution']].map(([k, l]) => `<button data-act="expense-personal" data-id="${esc(key(t.id))}" data-as="${k}" class="${(contributed ? 'contribution' : 'owner') === k ? 'on' : ''}">${l}</button>`).join('')}</div></div>` : ''}
-    <div class="btn-row"><button class="btn" data-act="txn-open" data-id="${esc(key(t.id))}">Open in Books</button></div>
+    <div class="btn-row"><button class="btn" data-act="txn-open" data-id="${esc(key(t.id))}">${icon('bookClosed')}Open in Books</button></div>
     <p class="note" style="text-align:center">It has several lines, so change it on the Mac.</p>
     ${isPaired(t) ? `<p class="note" style="text-align:center">${esc(PAIRED_NOTE)}</p>` : ''}`);
 }
@@ -678,7 +686,7 @@ function sheetDrive({ id = null, tripID = null } = {}) {
         <div class="two"><label class="field"><span>Odometer start</span><input name="odometerStart" type="number" inputmode="decimal" step="1" min="0" value="${m.odometerStart ? Math.round(m.odometerStart * factor) : ''}"></label><label class="field"><span>Odometer end</span><input name="odometerEnd" type="number" inputmode="decimal" step="1" min="0" value="${m.odometerEnd ? Math.round(m.odometerEnd * factor) : ''}"></label></div>
       </div><div class="fs-foot">${posted ? `In the books as ${contributionFor(posted.id) ? 'your contribution' : 'owed to you'}; saving keeps it in step.` : 'Saved here first; post it to the books when you like.'}</div></div>
       ${posted && contributionAccount() ? `<div class="form-section"><div class="fs-head">In the books</div><div class="segmented">${[['owner', 'Company pays me back'], ['contribution', 'My contribution']].map(([k, l]) => `<button type="button" data-act="expense-personal" data-id="${esc(key(posted.id))}" data-as="${k}" class="${(contributionFor(posted.id) ? 'contribution' : 'owner') === k ? 'on' : ''}">${l}</button>`).join('')}</div></div>` : ''}
-      ${existing && !posted && m.personalVehicle !== false ? `<div class="form-section"><div class="btn-row wrap"><button type="button" class="btn" data-act="drive-post" data-id="${esc(key(existing.id))}" data-as="owner">Post: Pay Me Back</button>${contributionAccount() ? `<button type="button" class="btn" data-act="drive-post" data-id="${esc(key(existing.id))}" data-as="contribution">Post as My Contribution</button>` : ''}</div></div>` : ''}
+      ${existing && !posted && m.personalVehicle !== false ? `<div class="form-section"><div class="btn-row wrap"><button type="button" class="btn" data-act="drive-post" data-id="${esc(key(existing.id))}" data-as="owner">${icon('wallet')}Post: Pay Me Back</button>${contributionAccount() ? `<button type="button" class="btn" data-act="drive-post" data-id="${esc(key(existing.id))}" data-as="contribution">${icon('handCoin')}Post as My Contribution</button>` : ''}</div></div>` : ''}
       <div class="sheet-actions">${existing ? `<button type="button" class="btn danger" data-act="drive-delete" data-id="${esc(key(existing.id))}" aria-label="Delete" style="flex:0 0 52px">${icon('trash')}</button>` : ''}<button type="button" class="btn" data-act="sheet-close">Cancel</button><button type="submit" class="btn primary">${existing ? 'Save' : 'Log Drive'}</button></div>
     </form>`, (el) => {
     const f = $('#drive-form', el);
