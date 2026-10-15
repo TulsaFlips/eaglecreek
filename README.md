@@ -195,6 +195,14 @@ tagged `Email`, and each attachment points back to it. Saving the same email aga
 same file. The script also keeps a small status record (`mailBridge`) with the labels and
 addresses it uses.
 
+## Flips and Work in Progress
+
+Eagle Creek Books (Mac v1.3.4 and later) keeps a flip's costs in **Work in Progress – Properties**
+until the property sells, then moves them to **Cost of Properties Sold** on the sale date, with one
+journal entry a month and one on the sale date. Here, those entries count in the books (balances
+and the P&L), but a project's cost pages count each bill and expense once, in its own category,
+so budget vs actual and costs by category read the same as before.
+
 ## Plan reader
 
 - **Move around:** pinch to zoom, drag to move, double-tap to zoom in (again to zoom out).

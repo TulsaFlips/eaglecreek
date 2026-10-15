@@ -74,7 +74,8 @@ const DEFAULT_CHART = [
   ['1000', 'Operating Checking', 'bank'], ['1010', 'Savings', 'bank'],
   ['1100', 'Accounts Receivable', 'accountsReceivable', null, 'accountsReceivable'],
   ['1150', 'Retainage Receivable', 'otherAsset', null, 'retainageReceivable'],
-  ['1200', 'Earnest Money Deposits', 'otherAsset'], ['1900', 'Uncategorized Asset', 'otherAsset', null, 'uncategorizedAsset'],
+  ['1200', 'Earnest Money Deposits', 'otherAsset'], ['1300', 'Work in Progress – Properties', 'otherAsset'],
+  ['1900', 'Uncategorized Asset', 'otherAsset', null, 'uncategorizedAsset'],
   ['2000', 'Accounts Payable', 'accountsPayable', null, 'accountsPayable'],
   ['2050', 'Retainage Payable', 'otherLiability', null, 'retainagePayable'],
   ['2100', 'Business Credit Card', 'creditCard'], ['2200', 'Sales Tax Payable', 'otherLiability', null, 'salesTaxPayable'],
@@ -97,6 +98,7 @@ const DEFAULT_CHART = [
   ['5320', 'Utilities', 'jobCost', 'holding'], ['5330', 'Lawn, HOA & Maintenance', 'jobCost', 'holding'],
   ['5400', 'Sale Commissions', 'jobCost', 'selling'], ['5410', 'Sell-Side Closing Costs', 'jobCost', 'selling'],
   ['5420', 'Staging, Photos & Marketing', 'jobCost', 'selling'], ['5900', 'Other Job Costs', 'jobCost', 'other'],
+  ['5950', 'Cost of Properties Sold', 'jobCost'],
   ['6000', 'Office, Software & Subscriptions', 'expense'], ['6100', 'Vehicle & Fuel', 'expense'], ['6200', 'Marketing & Deal Finding', 'expense'],
   ['6300', 'Legal & Accounting', 'expense'], ['6400', 'Bank & Merchant Fees', 'expense'], ['6500', 'Business Insurance', 'expense'],
   ['6600', 'Education & Dues', 'expense'], ['6700', 'Meals & Travel', 'expense'], ['6710', 'Travel – Air, Lodging & Car', 'expense'],
@@ -105,6 +107,8 @@ const DEFAULT_CHART = [
   ['7000', 'Other Income', 'otherIncome'], ['8000', 'Other Expenses', 'otherExpense'],
 ];
 const ADDED_IN_V04 = ['1150', '2050', '2500', '5140', '5145', '5150', '6800', '6710', '6720', '6730'];
+// Work in Progress for flips (Mac v1.3.4).
+const ADDED_IN_V134 = ['1300', '5950'];
 let defaultChartCache = null;
 function defaultChart() {
   defaultChartCache = defaultChartCache || DEFAULT_CHART.map(([number, name, type, costGroup, systemRole]) => ({
@@ -133,7 +137,7 @@ function booksSettings() {
   const deleted = new Set((rec?.deletedAccountIDs || []).map(key));
   const has = (id) => accounts.some((a) => sameId(a.id, id));
   const defaults = defaultChart();
-  for (const number of ADDED_IN_V04) {
+  for (const number of [...ADDED_IN_V04, ...ADDED_IN_V134]) {
     const t = defaults.find((a) => a.number === number);
     if (deleted.has(key(t.id)) || has(t.id)) continue;
     if (t.systemRole && accounts.some((a) => a.systemRole === t.systemRole)) continue;
@@ -516,12 +520,24 @@ function paidRatio(t) {
   if (t.type === 'bill') { const total = txnTotal(t); return total > 0.005 ? Math.min(1, Math.max(0, txnPaid(t) / total)) : 0; }
   return 0;
 }
+// ----- Work in Progress (Engine/WorkInProgress.swift)
+// Eagle Creek Books keeps each flip's costs in Work in Progress until it sells: an entry a month
+// moves them in, and one on the sale date moves them to Cost of Properties Sold. Each has a marker
+// line whose id comes from the entry's. They're real entries (so balances and the P&L include
+// them), but not costs of their own, so a project's cost pages leave them out.
+const WIP_ACCOUNT = () => chartID('1300');
+function isWIPEntry(t) {
+  if (t?.type !== 'journal' || !Array.isArray(t.lines)) return false;
+  const marker = stableID(`${key(t.id)}:wip`);
+  return t.lines.some((l) => sameId(l.id, marker));
+}
+
 /** Bills, expenses and crew-labor journal lines on a project. */
 function projectCosts(projectID) {
   const d = booksData();
   const out = [];
   for (const t of d.transactions) {
-    if (!sameId(t.projectID, projectID) || t.isVoid) continue;
+    if (!sameId(t.projectID, projectID) || t.isVoid || isWIPEntry(t)) continue;
     if (t.type === 'bill' || t.type === 'expense') { out.push(t); continue; }
     if (t.type !== 'journal') continue;
     const lines = (t.lines || []).filter((l) => d.account(l.accountID)?.type === 'jobCost');
@@ -733,8 +749,16 @@ function projectMoney(p) {
   if (cache.has(ck)) return cache.get(ck);
   const d = booksData();
   const costs = new Map(), income = new Map(), byGroup = new Map();
+  const generated = new Set(d.transactions.filter(isWIPEntry).map((t) => key(t.id)));
   for (const posting of d.postings) {
-    if (!sameId(posting.projectID, p.id)) continue;
+    if (!sameId(posting.projectID, p.id) || generated.has(key(posting.transactionID))) continue;
+    // Costs filed straight into Work in Progress (as QuickBooks had them) are costs too.
+    if (sameId(posting.accountID, WIP_ACCOUNT())) {
+      const k = key(posting.accountID);
+      costs.set(k, (costs.get(k) || 0) + posting.amount);
+      byGroup.set('other', (byGroup.get('other') || 0) + posting.amount);
+      continue;
+    }
     const a = d.account(posting.accountID);
     if (!a || isBalanceSheetType(a.type)) continue;
     const s = typeSection(a.type);
@@ -830,8 +854,9 @@ function clientFinancials(p) {
   f.estimatedCost = money(budget > 0 ? budget : money(included.reduce((s, l) => s + (l.quantity ?? 1) * (Number(l.unitCost) || 0), 0)) + f.approvedChangeCost);
   f.committed = money(all('commitment').filter((c) => sameId(c.projectID, p.id) && commitmentIsCommitted(c)).reduce((s, c) => s + commitmentAmount(c), 0));
   let cost = 0, income = 0, retainage = 0;
+  const generated = new Set(d.transactions.filter(isWIPEntry).map((t) => key(t.id)));
   for (const x of d.postings) {
-    if (!sameId(x.projectID, p.id)) continue;
+    if (!sameId(x.projectID, p.id) || generated.has(key(x.transactionID))) continue;
     const type = d.account(x.accountID)?.type;
     if (!type) continue;
     if (type === 'jobCost') cost += x.amount;
