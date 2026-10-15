@@ -495,3 +495,16 @@ a.kv { color: inherit; }
 .chips .chip-ic { width: 15px; height: 15px; vertical-align: -3px; margin-right: 5px; }
 .fs-title { display: inline-flex; align-items: center; gap: 6px; }
 .fs-head .fs-ic { width: 16px; height: 16px; color: var(--gold); }
+
+/* Emails saved from Gmail (mail.js) */
+.how-save { padding: 10px 14px; }
+.how-save .hs-line { display: flex; align-items: center; gap: 10px; font-size: 14.5px; padding: 4px 0; }
+.how-save .hs-line > div { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.how-save .hs-line .ic { width: 18px; height: 18px; flex: none; }
+.how-save .addr { font-weight: 600; }
+.how-save .btn.sm { flex: none; min-height: 32px; padding: 4px 10px; }
+.row .email-snip { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.row .email-att { display: inline-flex; flex-direction: row; align-items: center; gap: 3px; color: var(--muted); font-size: 13px; }
+.email-text { white-space: pre-wrap; overflow-wrap: anywhere; font-size: 14.5px; max-height: 320px; overflow: auto; }
+ol.steps { margin: 6px 0 4px; padding-left: 20px; font-size: 14.5px; line-height: 1.45; }
+ol.steps li { margin-bottom: 5px; }

@@ -105,6 +105,8 @@ const tradeIcon = (text, fallback = 'wrench') => iconMatch(text, TRADE_ICONS, fa
 
 const CARD_ICONS = [
   [/^notes$|^memo$|^scope$/i, 'note'],
+  [/^emails|gmail/i, 'mail'],
+  [/^attachments/i, 'paperclip'],
   [/^files|proof of travel|^documents/i, 'paperclip'],
   [/^dates$/i, 'calendar'],
   [/^check$/i, 'checkCircle'],
@@ -185,7 +187,7 @@ const FILE_ICONS = {
   propertyPhoto: 'image', progressPhoto: 'camera', invoice: 'doc', receipt: 'receipt', lienWaiver: 'seal', drawPaperwork: 'banknote',
   contractBid: 'signature', permitInspection: 'clipboard', closingTitle: 'key', loanDocument: 'bank', insurance: 'shield', plansSpecs: 'ruler',
   proposal: 'doc', changeOrder: 'branch', payApplication: 'listNumber', financialStatement: 'chart', bankStatement: 'bank', taxReturn: 'doc',
-  taxForm: 'doc', travel: 'airplane', entityDocument: 'building', other: 'folder',
+  taxForm: 'doc', travel: 'airplane', entityDocument: 'building', email: 'mail', other: 'folder',
 };
 /** Colours for each part of the chart of accounts. */
 const ACCOUNT_SECTION_TINTS = { assets: 'var(--forest)', liabilities: 'var(--leather)', equity: 'var(--gold)', income: 'var(--spruce)', otherIncome: 'var(--spruce)' };
@@ -211,6 +213,8 @@ const SECTION_ICONS = {
   'books:overview': 'grid', transactions: 'list', receipts: 'receipt', waivers: 'seal', accounts: 'bank', reports: 'chart',
   // Trips & Mileage
   list: 'airplane', mileage: 'car', usdays: 'globe', personal: 'wallet',
+  // Files
+  photos: 'image', documents: 'doc', emails: 'mail',
 };
 
 const segIcon = (name) => (name ? icon(name, 'ic seg-ic') : '');

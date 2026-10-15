@@ -106,6 +106,9 @@ sync (every few minutes, or **Sync Now**), and the other way round.
 - **Icons** in the same line style as the Mac's: on section pills, card titles and dashboard
   figures, by trade (plumbing, electrical, roofing…) on budget lines, selections, tasks and trades,
   by kind on documents, accounts and travel expenses, and by weather on daily logs.
+- **Emails:** label an email in Gmail, or forward it, and it's saved to a project's Files › Emails
+  or to the business Email Archive as a PDF of the conversation, with its attachments beside it
+  (see Save emails from Gmail below).
 - **Works offline.** Everything is saved on the device first and uploads when there's signal.
 
 Entering bills, invoices and deposits (travel expenses and personal purchases can be entered
@@ -141,6 +144,56 @@ records in your Supabase project.
 - **The change history** in Eagle Creek Books shows changes made here as **Web app**.
 - **On a Mac,** in Chrome or Safari, an entry's sheet has **Open in Eagle Creek** and **Open in
   Eagle Creek Books**, and Books › Overview links to Eagle Creek Books' Banking and 1099s.
+
+## Save emails from Gmail
+
+Keep the emails that matter with the job they're about (the client picking tile, the city
+approving a permit, a sub's quote) and the business ones in an archive of their own (the bank,
+the accountant, insurance, the state).
+
+- **Label it in Gmail** (the phone app or the website): **Eagle Creek/Business**, or
+  **Eagle Creek/** and the project's name. The project labels are made for you and kept up to
+  date as projects open and close.
+- **Or forward it** from any other inbox to your Gmail address with a tag:
+  `you+business@gmail.com`, `you+104@gmail.com` (the job number) or `you+77birchflip@gmail.com`
+  (the project's name, no spaces). Each project's Files › Emails page shows its label and address,
+  with a button to copy the address. The saved email is credited to whoever wrote the original.
+- Within about five minutes it's saved as a PDF of the whole conversation (who, when, every
+  message). Each attachment is saved as its own file beside it, with a type guessed from its name
+  the same way the Mac does (an attached permit lands in Permits & Inspections). Signature logos
+  and calendar invites are skipped. In Gmail the email moves to **Eagle Creek/Saved**.
+- **Where they show:** a project's **Files › Emails**; the **Email Archive** (the envelope on
+  Projects on a phone, **Email** in the sidebar on an iPad or computer) with **Business** and
+  **All Emails**, searchable by subject, sender, project or the words in the latest message; and
+  the contact's page, when the sender's email address matches a contact.
+- **An email** opens to who it's from and to, the date, its attachments, the latest message, and
+  buttons to open the PDF or the conversation in Gmail. **Move to** files it in another project
+  or the business archive; its attachments go with it.
+- On the Mac (v1.3.2 and later) emails are their own type, **Emails**, with a folder in each
+  project's Finder folder. An older Mac shows them as Other; their Email tag keeps them emails here.
+
+**Setting it up** (once, about 10 minutes, on a computer):
+
+1. In this app, **Settings › Save Emails from Gmail › Copy Setup Script**. It copies a short
+   script with your Supabase address, key and sign-in email filled in (`gmail-bridge.gs`).
+2. Go to [script.google.com](https://script.google.com), signed in to the business Gmail. Make
+   a new project, paste over what's there, and save.
+3. **Project Settings** (the gear) › **Script Properties** › add `EC_PASSWORD` with your Eagle
+   Creek password. The password lives only there, not in the script.
+4. Back in the editor, choose **setup** in the menu at the top and click **Run**. Google asks for
+   permission: Review permissions › your account › Advanced › Go to the project › Allow ("unsafe"
+   only means Google hasn't reviewed a script you added for yourself). The log says what it did.
+
+From then on it checks Gmail every 5 minutes. Settings shows which Gmail it's using, when it last
+checked, how many it has saved, and anything it couldn't save (those get the Gmail label
+**Eagle Creek/Not Saved**; label them again to retry). To stop it, run **stop** in the script.
+
+How it works: the script runs in your own Google account. It signs in to Supabase as you, with
+the publishable (or anon) key, and refuses the secret key. Your emails go from Gmail straight
+to your own Supabase project, as ordinary files: the conversation is a file of type `email`
+tagged `Email`, and each attachment points back to it. Saving the same email again updates the
+same file. The script also keeps a small status record (`mailBridge`) with the labels and
+addresses it uses.
 
 ## Plan reader
 

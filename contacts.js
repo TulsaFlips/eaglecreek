@@ -116,7 +116,8 @@ function contactFiles(cid) {
     if (t.waiver?.documentID) waiverFiles.add(key(t.waiver.documentID));
     for (const p of t.payments || []) if (p.waiver?.documentID) waiverFiles.add(key(p.waiver.documentID));
   }
-  return all('file').filter((f) => waiverFiles.has(key(f.id)) || sameId(fileContactID(f), cid))
+  // Saved emails have their own card (Emails); their attachments stay with the files.
+  return all('file').filter((f) => !isEmailFile(f) && (waiverFiles.has(key(f.id)) || sameId(fileContactID(f), cid)))
     .sort((a, b) => ((b.documentDate || 0) - (a.documentDate || 0)) || ((b.addedAt || 0) - (a.addedAt || 0)));
 }
 const ROLE_LABELS = ['Customer', 'Subcontract', 'PO', 'Bills', 'Invoices', 'Schedule'];
@@ -315,6 +316,9 @@ function viewContact(id) {
     const shown = S.ui.contactAllTxns === key(c.id) ? txns : txns.slice(0, 8);
     html += card(`Transactions (${txns.length})`, shown.map(txnRow).join('') + (shown.length < txns.length ? `<button class="row" data-act="contact-all-txns" data-id="${cid}"><div class="main"><div class="t" style="color:var(--forest)">Show all ${txns.length}</div></div></button>` : ''));
   }
+  // Emails saved from Gmail with them (mail.js)
+  const mails = typeof emailsForContact === 'function' ? emailsForContact(c) : [];
+  if (mails.length) html += card(`Emails (${mails.length})`, mails.slice(0, 20).map((f) => emailRow(f, { showProject: true })).join('') + (mails.length > 20 ? `<div class="empty-line small">${mails.length - 20} older in the Email Archive</div>` : ''));
   // Files
   const files = contactFiles(c.id);
   const filter = S.ui.contactFileCat?.[key(c.id)] || 'all';

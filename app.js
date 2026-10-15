@@ -6,7 +6,7 @@
  */
 'use strict';
 
-const APP_VERSION = '1.9.0';
+const APP_VERSION = '1.10.0';
 // The record kinds kept on this device. QuickBooks, bank imports and the rest stay on the Mac.
 // planSheet and planMark are the plan reader's scales and measurements (plans.js); the Mac app
 // leaves kinds it doesn't know alone.
@@ -14,7 +14,7 @@ const APP_VERSION = '1.9.0';
 // read for Contacts, the budget and the money pages; they're edited on the Mac.
 // trip and mileage are the Mac's Trips & Mileage; usStay (days in the US) is kept for the phone.
 const KINDS = ['project', 'file', 'task', 'dailyLog', 'punchItem', 'event', 'contact', 'company', 'planSheet', 'planMark',
-  'transaction', 'commitment', 'changeOrder', 'payApp', 'timeEntry', 'books', 'trip', 'mileage', 'usStay'];
+  'transaction', 'commitment', 'changeOrder', 'payApp', 'timeEntry', 'books', 'trip', 'mileage', 'usStay', 'mailBridge'];
 const KINDS_KEY = KINDS.join(',');
 const UPLOAD_LIMIT = 50_000_000; // Supabase's free plan, same as the Mac
 const CLIENT_APP = 'Web app'; // the Mac sends "eaglecreek", Eagle Creek Books "books"
@@ -189,19 +189,21 @@ const CATEGORY = {
   permitInspection: 'Permits & Inspections', closingTitle: 'Closing & Title', loanDocument: 'Loan Documents',
   insurance: 'Insurance', plansSpecs: 'Plans & Specs', proposal: 'Proposals & Estimates', changeOrder: 'Change Orders',
   payApplication: 'Pay Applications', financialStatement: 'Financial Statements', bankStatement: 'Bank Statements',
-  taxReturn: 'Tax Returns', taxForm: 'W-9s & 1099s', travel: 'Travel', entityDocument: 'LLC & Entity Documents', other: 'Other',
+  taxReturn: 'Tax Returns', taxForm: 'W-9s & 1099s', travel: 'Travel', entityDocument: 'LLC & Entity Documents', email: 'Emails', other: 'Other',
 };
 const CATEGORY_ONE = {
   propertyPhoto: 'Property Photo', progressPhoto: 'Progress Photo', invoice: 'Invoice', receipt: 'Receipt',
   lienWaiver: 'Lien Waiver', drawPaperwork: 'Draw Paperwork', contractBid: 'Contract / Bid', permitInspection: 'Permit / Inspection',
   closingTitle: 'Closing / Title', loanDocument: 'Loan Document', insurance: 'Insurance', plansSpecs: 'Plans / Specs',
   proposal: 'Proposal / Estimate', changeOrder: 'Change Order', payApplication: 'Pay Application', financialStatement: 'Financial Statement',
-  bankStatement: 'Bank Statement', taxReturn: 'Tax Return', taxForm: 'W-9 / 1099', travel: 'Travel Document', entityDocument: 'Entity Document', other: 'Other',
+  bankStatement: 'Bank Statement', taxReturn: 'Tax Return', taxForm: 'W-9 / 1099', travel: 'Travel Document', entityDocument: 'Entity Document', email: 'Email', other: 'Other',
 };
+/** Saved from Gmail (mail.js). An older Mac re-saves an unknown type as Other, but keeps the tag. */
+const isEmailFile = (f) => f?.category === 'email' || (Array.isArray(f?.tags) && f.tags.includes('Email'));
 const PHOTO_CATEGORIES = new Set(['propertyPhoto', 'progressPhoto']);
 const DOCUMENT_ORDER = ['plansSpecs', 'invoice', 'receipt', 'lienWaiver', 'drawPaperwork', 'proposal', 'contractBid', 'changeOrder',
   'payApplication', 'permitInspection', 'closingTitle', 'loanDocument', 'insurance', 'other'];
-const UPLOAD_CHOICES = ['progressPhoto', 'propertyPhoto', 'plansSpecs', 'receipt', 'invoice', 'permitInspection', 'lienWaiver', 'contractBid', 'changeOrder', 'insurance', 'other'];
+const UPLOAD_CHOICES = ['progressPhoto', 'propertyPhoto', 'plansSpecs', 'receipt', 'invoice', 'permitInspection', 'lienWaiver', 'contractBid', 'changeOrder', 'insurance', 'email', 'other'];
 const IMAGE_EXT = new Set(['jpg', 'jpeg', 'png', 'heic', 'heif', 'tif', 'tiff', 'gif', 'webp', 'bmp']);
 const CONTENT_TYPES = {
   pdf: 'application/pdf', jpg: 'image/jpeg', jpeg: 'image/jpeg', png: 'image/png', heic: 'image/heic', heif: 'image/heif',
@@ -1289,6 +1291,8 @@ const TABS = [
   ['trips', 'Trips', 'airplane', 'var(--slate)'],
   ['books', 'Books', 'bookClosed', 'var(--spruce)'],
   ['contacts', 'Contacts', 'people', 'var(--walnut)'],
+  // On a phone, the Email Archive is the envelope on Projects.
+  ['mail', 'Email', 'mail', 'var(--slate)', true],
   // On a phone, Settings is the gear on Projects; the sidebar lists it.
   ['settings', 'Settings', 'settings', 'var(--stone)', true],
 ];
@@ -1327,6 +1331,7 @@ function render() {
       case 'books': html = viewBooks(r.a || 'overview', r.b); break;
       case 'trips': html = viewTrips(r.a || 'list'); break;
       case 'trip': html = viewTrip(r.a); tab = 'trips'; break;
+      case 'mail': html = viewMail(r.a || 'business'); break;
       default: html = viewProjects(); tab = 'projects';
     }
   } catch (e) {
@@ -1443,7 +1448,7 @@ function projectRow(p) {
 }
 
 function viewProjects() {
-  setHeader({ title: 'Projects', actions: `<button class="icon-btn" data-act="receipt" aria-label="Snap a receipt" title="Snap a receipt">${icon('receipt')}</button>${isWide() ? '' : `<a class="icon-btn" href="#/settings" aria-label="Settings" title="Settings">${icon('settings')}</a>`}` });
+  setHeader({ title: 'Projects', actions: `<button class="icon-btn" data-act="receipt" aria-label="Snap a receipt" title="Snap a receipt">${icon('receipt')}</button>${isWide() ? '' : `<a class="icon-btn" href="#/mail" aria-label="Email archive" title="Email archive">${icon('mail')}</a><a class="icon-btn" href="#/settings" aria-label="Settings" title="Settings">${icon('settings')}</a>`}` });
   let html = '';
   if (S.syncError) html += banner(S.syncError);
   html += `<div class="search">${icon('search')}<input class="input" id="project-search" type="search" placeholder="Find a project" value="${esc(S.ui.search)}" autocomplete="off"></div>`;
@@ -1489,7 +1494,7 @@ const PROJECT_SECTIONS = [
   { id: 'budget', title: 'Budget', pages: ['budget', 'selections', 'subs'] },
   { id: 'schedule', title: 'Schedule', pages: ['schedule', 'logs', 'punch'] },
   { id: 'money', title: 'Money', pages: (p) => (p.kind === 'clientJob' ? ['billing', 'payApps', 'transactions', 'lienWaivers', 'reports'] : ['billing', 'draws', 'transactions', 'lienWaivers', 'reports']) },
-  { id: 'files', title: 'Files', pages: ['photos', 'documents'] },
+  { id: 'files', title: 'Files', pages: ['photos', 'documents', 'emails'] },
 ];
 const PROJECT_PAGES = {
   overview: ['Overview', (p) => projectOverview(p)],
@@ -1711,7 +1716,8 @@ function fileRow(f) {
 }
 
 function projectDocuments(p) {
-  const files = filesFor('projectID', p.id).filter((f) => !PHOTO_CATEGORIES.has(f.category));
+  // Emails have their own page (Files › Emails); their attachments stay here by type.
+  const files = filesFor('projectID', p.id).filter((f) => !PHOTO_CATEGORIES.has(f.category) && !isEmailFile(f));
   const add = `<button class="btn sm" data-act="add-file" data-project="${esc(key(p.id))}">${icon('plus')}Add a File</button>`;
   if (!files.length) return emptyState('doc', 'No Documents Yet', 'Plans, permits, contracts and other files for this project show up here.', `<div style="margin-top:14px">${add}</div>`);
   const by = new Map();
@@ -2008,6 +2014,7 @@ function viewSettings() {
     <button class="btn block" data-act="setup-link" style="margin-top:6px">${icon('share')}Set Up Another Device</button>
     <p class="note">Makes a link with your Supabase URL and key. On the other phone or iPad, paste it into the first box on the sign-in screen, then sign in with your email and password.</p>
   </div>`);
+  if (typeof mailSettingsCard === 'function') html += mailSettingsCard();
   html += card('This Device', `<div style="padding:0 16px 14px">
     <div class="btn-row wrap"><button class="btn" data-act="clear-cache">${icon('trash')}Free Up Space</button><button class="btn" data-act="full-sync">${icon('download')}Download Everything</button></div>
     <p class="note">Free Up Space removes downloaded copies of photos and documents; they download again when opened. Nothing waiting to upload is touched.</p>
