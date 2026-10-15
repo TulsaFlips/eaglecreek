@@ -276,6 +276,8 @@ Mac app's Settings → Cloud Sync and run `supabase/setup.sql` in the Supabase S
   here. Then the Mac keeps both versions (one as a conflict copy), as it does between two Macs.
 - The pill at the top shows sync. Tap it to sync now (or, if there's a problem, to see why).
   Photos waiting to upload say so on the photo.
+- In the closed books (set on the Mac), an expense's memo and trip can still change here; its
+  amount, date, category and how it was paid can't, and nothing moves in or out of them.
 - Receipts wait in Books › Receipts on the Mac. **Enter as Expense** there reads the store,
   date and total.
 - Reminders on events come from the Mac app's notifications.

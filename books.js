@@ -867,7 +867,7 @@ function clientFinancials(p) {
   f.laborCostToDate = 0; f.laborAtBillRates = 0;
   if (contract.type === 'timeAndMaterials') {
     const labor = d.account(chartID('5150')) ? chartID('5150') : (d.account(chartID('5100')) ? chartID('5100') : d.sys.uncategorizedExpense);
-    f.laborCostToDate = money(d.postings.filter((x) => sameId(x.projectID, p.id) && sameId(x.accountID, labor)).reduce((s, x) => s + x.amount, 0));
+    f.laborCostToDate = money(d.postings.filter((x) => sameId(x.projectID, p.id) && sameId(x.accountID, labor) && !generated.has(key(x.transactionID))).reduce((s, x) => s + x.amount, 0));
     f.laborAtBillRates = money(all('timeEntry').filter((t) => sameId(t.projectID, p.id) && t.billable !== false && (t.billRate || 0) > 0).reduce((s, t) => s + money(((t.hours || 0) + (t.overtimeHours || 0)) * t.billRate), 0));
   }
   let received = 0, open = 0;

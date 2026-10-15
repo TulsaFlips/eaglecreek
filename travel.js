@@ -82,7 +82,8 @@ function contributionEntry(expense, existing = null) {
   const ids = (t.lines || []).map((l) => l.id);
   t.lines = [
     { id: ids[0] || newId(), accountID: d.sys.dueToOwner, memo: `Owed to owner: ${who}`, quantity: 1, rate: 0, amount: total, taxable: true, isDepositCredit: false },
-    { id: ids[1] || newId(), accountID: contributionAccount(), memo: `Contribution: ${who}`, quantity: 1, rate: 0, amount: -total, taxable: true, isDepositCredit: false },
+    // The contribution account, or (when it's been archived since) the one the entry already uses.
+    { id: ids[1] || newId(), accountID: contributionAccount() || (existing?.lines || [])[1]?.accountID || null, memo: `Contribution: ${who}`, quantity: 1, rate: 0, amount: -total, taxable: true, isDepositCredit: false },
   ];
   return t;
 }
@@ -542,7 +543,8 @@ function sheetExpense({ id = null, tripID = null, files = [] } = {}) {
   const tripJobs = (trip?.projectIDs || []).map((x) => project(x)).filter(Boolean);
   const projectID = existing ? existing.projectID : tripJobs.length === 1 ? tripJobs[0].id : null;
   const kindGuess = existing ? (RECEIPT_KINDS.find(([k, l]) => (line.memo || '').startsWith(l)) || [])[0] || '' : '';
-  const contrib = contributionAccount();
+  // A contribution already recorded keeps its choice even if the account was archived since.
+  const contrib = contributionAccount() || (existing && contributionFor(existing.id) ? (contributionFor(existing.id).lines || [])[1]?.accountID : null);
   const personalOn = existing ? paidPersonally(existing) : null;
   const paid = existing ? (personalOn ? (contributionFor(existing.id) ? 'contribution' : 'owner') : key(existing.accountID)) : prefs.get('expense-paid-with', 'owner');
   const moneyAccounts = d.sorted.filter((a) => isMoneyAccountType(a.type) && !a.isArchived);
@@ -768,7 +770,9 @@ async function saveExpense(f) {
   const day = parseInputDate(v('date'));
   if (!day) { f.elements.date.focus(); return false; }
   const date = existing && sameDay(day, fromSec(existing.date)) ? existing.date : toSec(localNoon(day));
-  if (booksClosedOn(date)) { toast(closedMessage()); return false; }
+  // Nothing new goes into the closed books, and nothing in them moves out (checked below).
+  const inClosedBooks = !!existing && booksClosedOn(existing.date);
+  if (booksClosedOn(date) && !inClosedBooks) { toast(closedMessage()); return false; }
   const currency = v('currency');
   let usd = entered;
   let cadMemo = '';
@@ -785,11 +789,18 @@ async function saveExpense(f) {
   const lineMemo = [label, cadMemo].filter(Boolean).join(' · ');
   const paidWith = v('paidWith');
   const personal = paidWith === 'owner' || paidWith === 'contribution';
-  const accountID = personal ? d.sys.dueToOwner : (d.account(paidWith)?.id || d.sys.defaultBank);
+  // (An account no longer in the chart that it was already paid from stays as it is.)
+  const accountID = personal ? d.sys.dueToOwner
+    : (d.account(paidWith)?.id || (existing && key(existing.accountID) === paidWith ? existing.accountID : null) || d.sys.defaultBank);
   // How it was paid matters for 1099s (Eagle Creek Books leaves card payments off): a card
   // account is a card; otherwise keep what the Mac or Books set.
   const payType = personal ? null : d.account(accountID)?.type;
-  const method = payType === 'creditCard' ? 'card' : payType === 'bank' ? (existing?.method && existing.method !== 'card' ? existing.method : 'other') : (existing?.method || 'card');
+  // Paid personally: 'other', as the Mac records a receipt paid personally (unless the Mac or
+  // Books already said how).
+  const method = payType === 'creditCard' ? 'card'
+    : payType === 'bank' ? (existing?.method && existing.method !== 'card' ? existing.method : 'other')
+    : personal ? (existing && paidPersonally(existing) ? (existing.method || 'other') : 'other')
+    : (existing?.method || 'other');
   let fields = {
     payee: v('payee'), date, accountID, method,
     projectID: v('projectID') || null, tripID: f.dataset.trip ? (get(f.dataset.trip)?.id || f.dataset.trip) : (existing?.tripID || null), memo: f.elements.memo.value,
@@ -802,6 +813,13 @@ async function saveExpense(f) {
     const oldLine = (existing.lines || [])[0] || {};
     fields = Object.fromEntries(Object.entries(fields).filter(([k, val]) => !same(val, existing[k] ?? null)));
     line = Object.fromEntries(Object.entries(line).filter(([k, val]) => !same(val, oldLine[k] ?? null)));
+    // In the closed books only notes can change (its memo, its trip), like on the Mac.
+    if (inClosedBooks) {
+      const wasContribution = !!contributionFor(existing.id);
+      const changesBooks = Object.keys(fields).some((k) => k !== 'memo' && k !== 'tripID') || Object.keys(line).some((k) => !['memo', 'rate', 'quantity'].includes(k))
+        || wasContribution !== (paidWith === 'contribution');
+      if (changesBooks) { toast(closedMessage()); return false; }
+    }
   }
   prefs.set('expense-currency', currency);
   prefs.set('expense-paid-with', paidWith);

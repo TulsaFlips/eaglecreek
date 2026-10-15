@@ -34,7 +34,8 @@ const contactDisplayName = (c) => (c?.name || '').trim() || `Unnamed ${contactKi
 
 // ----- Money (the Mac's Money and Transaction maths)
 
-const money = (v) => (Number.isFinite(Number(v)) ? Math.round(Number(v) * 100) / 100 : 0);
+// Halves round away from zero, like the Mac (Math.round alone takes -2.5 to -2).
+const money = (v) => { const n = Number(v); return Number.isFinite(n) ? Math.sign(n) * Math.round(Math.abs(n) * 100) / 100 : 0; };
 fmt.money = (v, cents = false) => (Number(v) || 0).toLocaleString('en-US', { style: 'currency', currency: 'USD', minimumFractionDigits: cents ? 2 : 0, maximumFractionDigits: cents ? 2 : 0 });
 const TXN_TYPES = { bill: 'Bill', expense: 'Expense', invoice: 'Invoice', deposit: 'Deposit', transfer: 'Transfer', journal: 'Journal Entry' };
 const TXN_STATUS = {
