@@ -119,20 +119,22 @@ function cashChart(rows) {
 // ---------------------------------------------------------------------------
 // Books
 
-const BOOKS_PAGES = [['overview', 'Overview'], ['transactions', 'Transactions'], ['receipts', 'Receipts'], ['waivers', 'Lien Waivers'], ['accounts', 'Accounts'], ['reports', 'Reports']];
+const BOOKS_PAGES = [['overview', 'Overview'], ['bank', 'Bank'], ['transactions', 'Transactions'], ['receipts', 'Receipts'], ['waivers', 'Lien Waivers'], ['accounts', 'Accounts'], ['reports', 'Reports']];
 
 function viewBooks(page, arg) {
   if (page === 'account') return viewAccount(arg);
   if (page === 'report') return viewReport(arg, 'all', '#/books/reports');
+  if (page === 'bank' && arg) return viewFeedLine(arg);
   if (!BOOKS_PAGES.some(([k]) => k === page)) page = 'overview';
   const closed = booksData().settings.closedThrough;
   setHeader({ title: 'Books', sub: closed != null ? `Closed through ${fmt.date(fromSec(closed))}` : '' });
-  const nav = `<nav class="seg" aria-label="Books pages">${BOOKS_PAGES.map(([k, l]) => `<a href="#/books/${k}" class="${k === page ? 'on' : ''}">${segIcon(SECTION_ICONS[`books:${k}`] || SECTION_ICONS[k])}${l}</a>`).join('')}</nav>`;
+  const toReview = feedReviewCount();
+  const nav = `<nav class="seg" aria-label="Books pages">${BOOKS_PAGES.map(([k, l]) => `<a href="#/books/${k}" class="${k === page ? 'on' : ''}">${segIcon(SECTION_ICONS[`books:${k}`] || SECTION_ICONS[k])}${k === 'bank' && toReview ? `${l} (${toReview})` : l}</a>`).join('')}</nav>`;
   let html = S.syncError ? banner(S.syncError) : '';
   if (!all('transaction').length && !all('books').length) {
     html += S.meta.lastSync ? '' : emptyState('bookClosed', 'Getting Your Books', 'Downloading from Supabase…');
   }
-  const body = { overview: booksOverview, transactions: () => transactionList('all'), receipts: receiptsPage, waivers: () => waiverList('all'), accounts: accountsPage, reports: () => reportList('all') }[page];
+  const body = { overview: booksOverview, bank: bankFeedPage, transactions: () => transactionList('all'), receipts: receiptsPage, waivers: () => waiverList('all'), accounts: accountsPage, reports: () => reportList('all') }[page];
   return nav + html + body();
 }
 
@@ -152,6 +154,8 @@ function booksOverview() {
     ${tile('Profit This Year', fmt.money(profit), 'Includes costs on houses not sold yet', { accent: 'var(--gold)', tint: profitTint(profit) })}
   </div>`;
   const notes = [];
+  const toReview = feedReviewCount();
+  if (toReview) notes.push(`<a href="#/books/bank">${esc(plural(toReview, 'bank line'))} to review</a>`);
   if (loans > 0.005) notes.push(esc(`Loans owed: ${fmt.money(loans)}`));
   if (owedToOwner > 0.005) notes.push(`<a href="#/trips/personal">The company owes you ${esc(fmt.money(owedToOwner, true))}</a>`);
   if (notes.length) html += `<p class="note" style="margin:-4px 4px 14px">${notes.join(' · ')}</p>`;

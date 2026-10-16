@@ -210,7 +210,7 @@ const SECTION_ICONS = {
   // A project's sections
   overview: 'house', contract: 'signature', budget: 'coins', schedule: 'schedule', money: 'banknote', files: 'folder',
   // Books
-  'books:overview': 'grid', transactions: 'list', receipts: 'receipt', waivers: 'seal', accounts: 'bank', reports: 'chart',
+  'books:overview': 'grid', 'books:bank': 'bank', transactions: 'list', receipts: 'receipt', waivers: 'seal', accounts: 'bank', reports: 'chart',
   // Trips & Mileage
   list: 'airplane', mileage: 'car', usdays: 'globe', personal: 'wallet',
   // Files

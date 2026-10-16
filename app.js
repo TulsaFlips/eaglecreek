@@ -6,7 +6,7 @@
  */
 'use strict';
 
-const APP_VERSION = '1.11.0';
+const APP_VERSION = '1.12.0';
 // The record kinds kept on this device. QuickBooks, bank imports and the rest stay on the Mac.
 // planSheet and planMark are the plan reader's scales and measurements (plans.js); the Mac app
 // leaves kinds it doesn't know alone.
@@ -15,7 +15,12 @@ const APP_VERSION = '1.11.0';
 // trip and mileage are the Mac's Trips & Mileage; usStay (days in the US) is kept for the phone.
 const KINDS = ['project', 'file', 'task', 'dailyLog', 'punchItem', 'event', 'contact', 'company', 'planSheet', 'planMark',
   'transaction', 'commitment', 'changeOrder', 'payApp', 'timeEntry', 'books', 'trip', 'mileage', 'usStay', 'mailBridge'];
-const KINDS_KEY = KINDS.join(',');
+// Eagle Creek Books' own table (`ledger_documents`, setup.sql v1.3): bank feed lines, so they can
+// be reviewed from the phone (feed.js). Each row also carries the company (`entity_id`).
+const LEDGER_KINDS = ['feedLine'];
+const LEDGER_TABLE = 'ledger_documents';
+const tableFor = (kind) => (LEDGER_KINDS.includes(kind) ? LEDGER_TABLE : 'documents');
+const KINDS_KEY = [...KINDS, ...LEDGER_KINDS].join(',');
 const UPLOAD_LIMIT = 50_000_000; // Supabase's free plan, same as the Mac
 const CLIENT_APP = 'Web app'; // the Mac sends "eaglecreek", Eagle Creek Books "books"
 
@@ -306,7 +311,7 @@ const idb = (() => {
 // ---------------------------------------------------------------------------
 // App state
 
-const freshMeta = () => ({ cursor: null, lastFull: 0, lastSync: 0, uploads: [], storageDeletes: [], kinds: KINDS_KEY, recordOps: {} });
+const freshMeta = () => ({ cursor: null, lastFull: 0, lastSync: 0, ledgerCursor: null, ledgerLastFull: 0, uploads: [], storageDeletes: [], kinds: KINDS_KEY, recordOps: {} });
 const S = {
   config: null, // { url, key }
   session: null, // { accessToken, refreshToken, expiresAt, userID, email }
@@ -558,15 +563,15 @@ function serverStamp(text) {
 }
 
 /** Rows changed since the cursor (or everything). Falls back to everything without server stamps. */
-async function fetchChanges(token, since) {
-  const kinds = `in.(${KINDS.join(',')})`;
+async function fetchChanges(token, since, table = 'documents') {
+  const kinds = `in.(${(table === LEDGER_TABLE ? LEDGER_KINDS : KINDS).join(',')})`;
   async function pages(withStamps, sinceISO) {
     const rows = [];
     for (;;) {
       const q = [['select', withStamps ? 'id,kind,deleted,data,server_updated_at' : 'id,kind,deleted,data'], ['kind', kinds]];
       if (sinceISO) q.push(['server_updated_at', `gt.${sinceISO}`]);
       q.push(['order', 'id.asc'], ['limit', '1000'], ['offset', String(rows.length)]);
-      const page = await api('/rest/v1/documents', { query: q, token });
+      const page = await api(`/rest/v1/${table}`, { query: q, token });
       if (!Array.isArray(page)) throw new Error('Unexpected response from Supabase.');
       rows.push(...page);
       // Stop at an empty page: Supabase may cap pages below 1,000.
@@ -598,7 +603,7 @@ async function applyRemote(rows) {
   let changed = false;
   let rebasedAny = false;
   for (const r of rows) {
-    if (!r || !r.id || !KINDS.includes(r.kind)) continue;
+    if (!r || !r.id || !(KINDS.includes(r.kind) || LEDGER_KINDS.includes(r.kind))) continue;
     const id = key(r.id);
     const data = r.data && typeof r.data === 'object' ? r.data : {};
     const remoteStamp = Number(data.updatedAt) || 0;
@@ -704,18 +709,23 @@ async function pushChanges(token) {
     const ids = [...S.dirty].filter((id) => S.docs.has(id) && !S.meta.uploads.includes(id));
     if (!ids.length) break;
     const turnedDown = [];
-    for (let i = 0; i < ids.length; i += 100) {
-      const chunk = ids.slice(i, i + 100);
+    // Each table gets its own rows (Eagle Creek Books' bank lines go to ledger_documents).
+    const batches = [];
+    for (const table of ['documents', LEDGER_TABLE]) {
+      const mine = ids.filter((id) => tableFor(S.docs.get(id).kind) === table);
+      for (let i = 0; i < mine.length; i += 100) batches.push([table, mine.slice(i, i + 100)]);
+    }
+    for (const [table, chunk] of batches) {
       const sent = chunk.map((id) => {
         const row = S.docs.get(id);
-        return {
-          id, stamp: row.data.updatedAt, deleted: row.deleted, body: {
-            id, kind: row.kind, deleted: row.deleted,
-            updated_at: new Date((row.data.updatedAt || stamp()) * 1000).toISOString(), data: row.data,
-          },
+        const body = {
+          id, kind: row.kind, deleted: row.deleted,
+          updated_at: new Date((row.data.updatedAt || stamp()) * 1000).toISOString(), data: row.data,
         };
+        if (table === LEDGER_TABLE) body.entity_id = row.data.entityID ? key(row.data.entityID) : null;
+        return { id, stamp: row.data.updatedAt, deleted: row.deleted, body };
       });
-      const saved = await api('/rest/v1/documents', {
+      const saved = await api(`/rest/v1/${table}`, {
         method: 'POST', token, query: [['select', 'id']],
         headers: { 'Content-Type': 'application/json', Prefer: 'resolution=merge-duplicates,return=representation' },
         body: JSON.stringify(sent.map((x) => x.body)),
@@ -760,9 +770,10 @@ function recordLabel(row) {
  */
 async function takeNewerCopies(token, ids) {
   const lost = [];
-  for (let i = 0; i < ids.length; i += 50) {
-    const chunk = ids.slice(i, i + 50);
-    const rows = await api('/rest/v1/documents', {
+  const byTable = { documents: ids.filter((id) => tableFor(S.docs.get(id)?.kind) === 'documents'), [LEDGER_TABLE]: ids.filter((id) => tableFor(S.docs.get(id)?.kind) === LEDGER_TABLE) };
+  for (const [table, list] of Object.entries(byTable)) for (let i = 0; i < list.length; i += 50) {
+    const chunk = list.slice(i, i + 50);
+    const rows = await api(`/rest/v1/${table}`, {
       token, query: [['select', 'id,kind,deleted,data,updated_at'], ['id', `in.(${chunk.join(',')})`]],
     });
     if (!Array.isArray(rows)) continue;
@@ -825,6 +836,21 @@ async function syncNow({ full = false } = {}) {
     } else {
       S.meta.cursor = null;
       S.meta.lastFull = 0;
+    }
+    // Eagle Creek Books' bank lines, from its own table (missing on a Supabase project that
+    // hasn't run setup.sql v1.3: then there's simply no bank feed here).
+    let sinceLedger = null;
+    if (!full && S.meta.ledgerCursor && Date.now() / 1000 - (S.meta.ledgerLastFull || 0) < 86_400) sinceLedger = S.meta.ledgerCursor - 300;
+    try {
+      const ledger = await fetchChanges(session.accessToken, sinceLedger, LEDGER_TABLE);
+      if (await applyRemote(ledger.rows)) changed = true;
+      if (ledger.stamps) {
+        if (ledger.newest) S.meta.ledgerCursor = Math.max(S.meta.ledgerCursor || 0, ledger.newest);
+        if (sinceLedger === null) S.meta.ledgerLastFull = Date.now() / 1000;
+      }
+      S.ledgerUnavailable = false;
+    } catch (e) {
+      if (e instanceof ApiError && (e.status === 404 || /ledger_documents/.test(e.message))) S.ledgerUnavailable = true; else throw e;
     }
     await deleteStoredFiles(session);
     const fileProblem = await uploadFiles(session);

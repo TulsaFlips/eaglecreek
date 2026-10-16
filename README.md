@@ -195,6 +195,22 @@ tagged `Email`, and each attachment points back to it. Saving the same email aga
 same file. The script also keeps a small status record (`mailBridge`) with the labels and
 addresses it uses.
 
+## The bank feed on your phone
+
+Eagle Creek Books (Mac v1.3.6 and later) keeps the bank and card lines it brings in from Plaid or
+statement files in its own Supabase table (`ledger_documents`, from `supabase/setup.sql` v1.3).
+**Books › Bank** here shows the business's lines waiting For Review. Tap one to:
+
+- **Match** the entry already in the books (the ones for the same amount within a few days are
+  offered; the entry is marked cleared, like Books does).
+- **Add** it as an expense or deposit, with a vendor, category and project; the category and
+  project are filled in from the last time that payee was recorded. Splits across projects and
+  transfers between accounts are done in Books.
+- **Leave Out** a personal charge or a duplicate.
+
+Decided lines show under Decided This Week with **Undo**. The phone uses the Mac's ids and fields,
+so Books shows each decision as its own and nothing is doubled; its Undo works on them too.
+
 ## Flips and Work in Progress
 
 Eagle Creek Books (Mac v1.3.4 and later) keeps a flip's costs in **Work in Progress – Properties**
