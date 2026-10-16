@@ -278,6 +278,8 @@ Mac app's Settings → Cloud Sync and run `supabase/setup.sql` in the Supabase S
   Photos waiting to upload say so on the photo.
 - In the closed books (set on the Mac), an expense's memo and trip can still change here; its
   amount, date, category and how it was paid can't, and nothing moves in or out of them.
+- An expense reconciled in Eagle Creek Books (Mac v1.3.5 and later) keeps its date, account and
+  amount here too, and can't be deleted; its category, memo and trip can still change.
 - Receipts wait in Books › Receipts on the Mac. **Enter as Expense** there reads the store,
   date and total.
 - Reminders on events come from the Mac app's notifications.

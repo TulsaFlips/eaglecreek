@@ -59,6 +59,9 @@ function booksClosedOn(sec) {
   const closed = booksData().settings.closedThrough;
   return closed != null && sod(fromSec(sec)) <= sod(fromSec(closed));
 }
+// Reconciled in Eagle Creek Books: the entry's date, account and amount are fixed everywhere.
+const isReconciled = (t) => !!t && (t.reconciledAt != null || t.toReconciledAt != null || (t.payments || []).some((p) => p.reconciledAt != null));
+const reconciledMessage = () => 'This entry is part of a finished reconciliation in Eagle Creek Books, so its date, account and amount are fixed and it can\'t be deleted. The memo, category and trip can still change.';
 function closedMessage() {
   return `The books are closed through ${fmt.date(fromSec(booksData().settings.closedThrough))}. Use a later date, or move the closed date back on the Mac (Settings › Books).`;
 }
@@ -773,6 +776,7 @@ async function saveExpense(f) {
   // Nothing new goes into the closed books, and nothing in them moves out (checked below).
   const inClosedBooks = !!existing && booksClosedOn(existing.date);
   if (booksClosedOn(date) && !inClosedBooks) { toast(closedMessage()); return false; }
+  const reconciled = isReconciled(existing);
   const currency = v('currency');
   let usd = entered;
   let cadMemo = '';
@@ -813,12 +817,15 @@ async function saveExpense(f) {
     const oldLine = (existing.lines || [])[0] || {};
     fields = Object.fromEntries(Object.entries(fields).filter(([k, val]) => !same(val, existing[k] ?? null)));
     line = Object.fromEntries(Object.entries(line).filter(([k, val]) => !same(val, oldLine[k] ?? null)));
-    // In the closed books only notes can change (its memo, its trip), like on the Mac.
-    if (inClosedBooks) {
+    // In the closed books only notes can change (its memo, its trip), like on the Mac. A
+    // reconciled entry keeps its date, account and amount; its category can still change.
+    if (inClosedBooks || reconciled) {
       const wasContribution = !!contributionFor(existing.id);
-      const changesBooks = Object.keys(fields).some((k) => k !== 'memo' && k !== 'tripID') || Object.keys(line).some((k) => !['memo', 'rate', 'quantity'].includes(k))
-        || wasContribution !== (paidWith === 'contribution');
-      if (changesBooks) { toast(closedMessage()); return false; }
+      const fixedFields = inClosedBooks ? ['payee', 'date', 'accountID', 'method', 'projectID'] : ['date', 'accountID'];
+      const fixedLine = inClosedBooks ? ['accountID', 'amount'] : ['amount'];
+      const changesBooks = Object.keys(fields).some((k) => fixedFields.includes(k)) || Object.keys(line).some((k) => fixedLine.includes(k))
+        || (inClosedBooks && wasContribution !== (paidWith === 'contribution'));
+      if (changesBooks) { toast(inClosedBooks ? closedMessage() : reconciledMessage()); return false; }
     }
   }
   prefs.set('expense-currency', currency);
@@ -922,6 +929,7 @@ Object.assign(ACTIONS, {
     const t = get(el.dataset.id);
     if (!t) return;
     if (booksClosedOn(t.date)) { toast(closedMessage()); return; }
+    if (isReconciled(t)) { toast(reconciledMessage()); return; }
     if (!confirm(`Delete this ${fmt.money(txnTotal(t), true)} expense?\n\nIt's removed from the books on every device. Its receipt stays in Files.${isPaired(t) ? '\n\nEagle Creek Books recorded it in your personal books too; delete the personal side there (Banking › Undo on its bank line).' : ''}`)) return;
     closeSheet();
     if (get(contributionID(t.id))) await deleteRecord('transaction', contributionID(t.id));
@@ -947,6 +955,7 @@ Object.assign(ACTIONS, {
     const posted = mileagePosted(m);
     if (!confirm(`Delete this drive?${posted ? '\n\nIts expense comes out of the books too.' : ''}`)) return;
     closeSheet();
+    if (posted && isReconciled(posted)) { toast(reconciledMessage()); return; }
     if (posted && !booksClosedOn(posted.date)) {
       if (get(contributionID(posted.id))) await deleteRecord('transaction', contributionID(posted.id));
       await deleteRecord('transaction', posted.id);
@@ -1039,6 +1048,8 @@ document.addEventListener('submit', async (e) => {
     const posted = existing ? mileagePosted(existing) : null;
     if (posted && !booksClosedOn(posted.date) && !booksClosedOn(m.date)) {
       const t = mileageExpense(m, posted);
+      // A reconciled mileage expense keeps its amount; only the drive's notes change.
+      if (isReconciled(posted) && (Math.abs(txnTotal(t) - txnTotal(posted)) >= 0.005 || t.date !== posted.date)) { toast(reconciledMessage()); return; }
       await saveRecord('transaction', t);
       if (contributionFor(t.id)) await setContributed(t, true);
     }

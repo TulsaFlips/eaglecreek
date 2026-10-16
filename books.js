@@ -62,17 +62,18 @@ const isBalanceSheetType = (type) => ['assets', 'liabilities', 'equity'].include
 const isMoneyAccountType = (type) => type === 'bank' || type === 'creditCard';
 const COST_GROUPS = { acquisition: 'Acquisition', rehab: 'Rehab', financing: 'Loan Costs', holding: 'Holding Costs', selling: 'Selling Costs', other: 'Other Project Costs' };
 const SYSTEM_ROLES = ['accountsReceivable', 'accountsPayable', 'salesTaxPayable', 'openingBalanceEquity', 'retainedEarnings', 'uncategorizedIncome',
-  'uncategorizedExpense', 'uncategorizedAsset', 'retainageReceivable', 'retainagePayable', 'payrollClearing', 'dueToOwner'];
+  'uncategorizedExpense', 'uncategorizedAsset', 'retainageReceivable', 'retainagePayable', 'payrollClearing', 'dueToOwner', 'undepositedFunds'];
 const ROLE_NUMBER = {
   accountsReceivable: '1100', accountsPayable: '2000', salesTaxPayable: '2200', openingBalanceEquity: '3800', retainedEarnings: '3900',
   uncategorizedIncome: '4900', uncategorizedExpense: '6900', uncategorizedAsset: '1900', retainageReceivable: '1150', retainagePayable: '2050',
-  payrollClearing: '2500', dueToOwner: '2600',
+  payrollClearing: '2500', dueToOwner: '2600', undepositedFunds: '1120',
 };
 
 // The Mac's starting chart (DefaultChart.accounts()).
 const DEFAULT_CHART = [
   ['1000', 'Operating Checking', 'bank'], ['1010', 'Savings', 'bank'],
   ['1100', 'Accounts Receivable', 'accountsReceivable', null, 'accountsReceivable'],
+  ['1120', 'Payments to Deposit', 'otherAsset', null, 'undepositedFunds'],
   ['1150', 'Retainage Receivable', 'otherAsset', null, 'retainageReceivable'],
   ['1200', 'Earnest Money Deposits', 'otherAsset'], ['1300', 'Work in Progress – Properties', 'otherAsset'],
   ['1900', 'Uncategorized Asset', 'otherAsset', null, 'uncategorizedAsset'],
