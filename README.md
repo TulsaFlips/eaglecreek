@@ -280,6 +280,28 @@ straight to your Supabase project, and only your email and password can open it.
 The Mac app needs Cloud Sync turned on with the same account. If it isn't yet, set it up in the
 Mac app's Settings → Cloud Sync and run `supabase/setup.sql` in the Supabase SQL Editor.
 
+## The lock (1.13.0)
+
+Right after signing in, the app asks for a **six-digit PIN**, and offers **Face ID / Touch ID**
+where the device can give the app a key from a passkey (iOS 18 Safari does; where it can't, the
+PIN is used and the app says so). Everything the app keeps on the device (your sign-in, every
+record, every photo and document copy) is encrypted with a key that exists only while the app is
+unlocked; the PIN (PBKDF2, 310,000 rounds) or your face unwraps it. So a phone taken while locked,
+or its browser storage copied off it, gives up nothing readable.
+
+- The app locks when it has been in the background for **2 minutes** (Settings › Security: right
+  away, 1, 2, 5 or 15 minutes), and **Lock Now** is there too.
+- Five wrong PINs bring a 30-second wait that doubles each time; **ten wrong PINs erase the
+  device's copy**, as does **two weeks without unlocking**. Your books stay in the cloud: sign in
+  again and set a new PIN.
+- **Signed out from the Mac** (Eagle Creek Books › Settings › Security): the phone erases its copy
+  the next time it reaches the server and shows the sign-in screen with a note saying why.
+  **Sign Out All Other Devices** there also ends the phone's session at Supabase at once.
+- Every device registers itself (name, app version, whether the lock is on) so the Mac can list
+  them. Settings › Security on the phone shows this device's name.
+- The page carries a content security policy: it can only talk to its own files, your Supabase
+  project and the weather and exchange-rate services.
+
 ## Good to know
 
 - Edits follow the Mac's rule: the newest edit wins. If the same punch item is changed on the

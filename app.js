@@ -6,7 +6,7 @@
  */
 'use strict';
 
-const APP_VERSION = '1.12.0';
+const APP_VERSION = '1.13.0';
 // The record kinds kept on this device. QuickBooks, bank imports and the rest stay on the Mac.
 // planSheet and planMark are the plan reader's scales and measurements (plans.js); the Mac app
 // leaves kinds it doesn't know alone.
@@ -17,7 +17,7 @@ const KINDS = ['project', 'file', 'task', 'dailyLog', 'punchItem', 'event', 'con
   'transaction', 'commitment', 'changeOrder', 'payApp', 'timeEntry', 'books', 'trip', 'mileage', 'usStay', 'mailBridge'];
 // Eagle Creek Books' own table (`ledger_documents`, setup.sql v1.3): bank feed lines, so they can
 // be reviewed from the phone (feed.js). Each row also carries the company (`entity_id`).
-const LEDGER_KINDS = ['feedLine'];
+const LEDGER_KINDS = ['feedLine', 'device'];
 const LEDGER_TABLE = 'ledger_documents';
 const tableFor = (kind) => (LEDGER_KINDS.includes(kind) ? LEDGER_TABLE : 'documents');
 const KINDS_KEY = [...KINDS, ...LEDGER_KINDS].join(',');
@@ -262,9 +262,11 @@ const prefs = (() => {
 })();
 
 // ---------------------------------------------------------------------------
-// On-device storage (IndexedDB)
+// On-device storage (IndexedDB). `rawIDB` is the database as it is; `idb` seals and opens
+// values with the app lock's key (lock.js) on the way in and out, so records, photos and the
+// sign-in are ciphertext on the device once a lock is set up.
 
-const idb = (() => {
+const rawIDB = (() => {
   let opening;
   const STORES = ['kv', 'docs', 'blobs', 'cache'];
   function open() {
@@ -307,6 +309,24 @@ const idb = (() => {
     },
   };
 })();
+
+const idb = {
+  async get(s, k) { return LOCK.open(await rawIDB.get(s, k)); },
+  async set(s, k, v) { return rawIDB.set(s, k, LOCK.seals(s, k) ? await LOCK.seal(v) : v); },
+  del: (s, k) => rawIDB.del(s, k),
+  clear: (s) => rawIDB.clear(s),
+  async batch(s, puts, dels = []) {
+    const sealed = [];
+    for (const [k, v] of puts) sealed.push([k, LOCK.seals(s, k) ? await LOCK.seal(v) : v]);
+    return rawIDB.batch(s, sealed, dels);
+  },
+  async all(s) {
+    const rows = await rawIDB.all(s);
+    const out = [];
+    for (const [k, v] of rows) out.push([k, await LOCK.open(v)]);
+    return out;
+  },
+};
 
 // ---------------------------------------------------------------------------
 // App state
@@ -516,6 +536,9 @@ async function signIn(email, password) {
   S.meta.lastFull = 0;
   await idb.set('kv', 'session', session);
   await saveMeta();
+  // A fresh sign-in on a device that was signed out from the Mac: its old row says "signed
+  // out" until this device registers again, so that row isn't obeyed once more.
+  await rawIDB.set('kv', 'device-fresh', true);
 }
 
 async function validSession(force = false) {
@@ -852,6 +875,7 @@ async function syncNow({ full = false } = {}) {
     } catch (e) {
       if (e instanceof ApiError && (e.status === 404 || /ledger_documents/.test(e.message))) S.ledgerUnavailable = true; else throw e;
     }
+    if (await deviceCheckIn()) return; // signed out from the Mac: everything here is gone
     await deleteStoredFiles(session);
     const fileProblem = await uploadFiles(session);
     S.syncDetail = 'Sending changes…';
@@ -1335,10 +1359,28 @@ function renderTabs(active) {
 function render() {
   flushLogSave();
   const main = $('#main');
+  if (LOCK.isLocked()) {
+    if ($('#lock-screen')) return; // already up; a re-render would drop the digits typed so far
+    $('#tabs').classList.add('hidden');
+    $('#top').classList.add('hidden');
+    main.innerHTML = LOCK.lockHTML();
+    wireLockScreen();
+    render.lastHash = null;
+    return;
+  }
   if (!S.config || !S.session) {
     renderTabs(null);
     renderHeader();
     main.innerHTML = viewWelcome();
+    render.lastHash = null;
+    return;
+  }
+  if (lockNeedsSetup()) {
+    if ($('#lock-setup')) return;
+    $('#tabs').classList.add('hidden');
+    $('#top').classList.add('hidden');
+    main.innerHTML = LOCK.setupHTML(S.session.email);
+    wireLockSetup();
     render.lastHash = null;
     return;
   }
@@ -1408,12 +1450,14 @@ const allClear = (text) => `<div class="all-clear">${icon('checkCircle')}${esc(t
 
 function viewWelcome() {
   const c = S.config || {};
+  const wiped = S.wipeNotice ? banner(S.wipeNotice, 'var(--slate)') : '';
   const homeHint = isIOS && !isStandalone()
     ? `<div class="banner" style="--c:var(--slate)">${icon('share')}<div>On iPhone and iPad, add Eagle Creek to your Home Screen first (Share → Add to Home Screen), then open it from there and sign in. The Home Screen app keeps its own sign-in.</div></div>` : '';
   return `<div class="welcome">
     <img class="logo" src="icon-180.png" alt="">
     <h1>Eagle Creek</h1>
     <p class="lede">Your projects in the field: photos, daily logs, punch lists and the schedule, synced with the Mac app.</p>
+    ${wiped}
     ${homeHint}
     <form id="signin" autocomplete="on">
       <div class="form-section"><div class="fs-head">${fsTitle('link', 'Supabase project')}</div><div class="form-card">
@@ -2041,6 +2085,7 @@ function viewSettings() {
     <p class="note">Makes a link with your Supabase URL and key. On the other phone or iPad, paste it into the first box on the sign-in screen, then sign in with your email and password.</p>
   </div>`);
   if (typeof mailSettingsCard === 'function') html += mailSettingsCard();
+  html += securitySettingsCard();
   html += card('This Device', `<div style="padding:0 16px 14px">
     <div class="btn-row wrap"><button class="btn" data-act="clear-cache">${icon('trash')}Free Up Space</button><button class="btn" data-act="full-sync">${icon('download')}Download Everything</button></div>
     <p class="note">Free Up Space removes downloaded copies of photos and documents; they download again when opened. Nothing waiting to upload is touched.</p>
@@ -2539,15 +2584,215 @@ const ACTIONS = {
       : 'Sign out of Eagle Creek on this device?\n\nEverything downloaded here is removed. Your data stays safe in the cloud.')) return;
     S.lastEmail = S.session?.email || '';
     await signOut();
-    for (const s of ['docs', 'blobs', 'cache']) await idb.clear(s);
-    S.docs.clear(); S.dirty.clear();
-    S.meta = freshMeta();
-    await saveMeta();
-    bump();
-    history.replaceState(null, '', `${location.pathname}#/projects`);
+    await LOCK.wipe(null);
+  },
+
+  // ----- The app lock (Settings › Security)
+  'lock-now': async () => { await LOCK.lock(); },
+  'lock-timeout': async (el) => { await LOCK.setTimeout(el.dataset.seconds); render(); },
+  'lock-bio': async () => {
+    if (LOCK.bioEnabled()) {
+      if (!confirm('Turn off Face ID / Touch ID for Eagle Creek? Your PIN still unlocks it.')) return;
+      await LOCK.removeBiometric();
+      toast('Face ID turned off');
+      render();
+      return;
+    }
+    const pin = await askPIN('Your PIN', 'To add Face ID / Touch ID, enter your PIN first.');
+    if (!pin) return;
+    const result = await LOCK.enrollBiometric(pin);
+    if (result === 'ok') toast('Face ID / Touch ID can unlock Eagle Creek now');
+    else if (result === 'wrong-pin') toast("That wasn't your PIN.");
+    else if (result === 'cancelled') toast('Cancelled');
+    else toast("This device can't unlock the app with Face ID (its browser doesn't give apps a key from the passkey). The PIN is used.");
     render();
   },
+  'lock-change-pin': async () => {
+    const current = await askPIN('Current PIN', 'Enter the PIN you use now.');
+    if (!current) return;
+    const next = await askPIN('New PIN', 'Six digits.');
+    if (!next) return;
+    const again = await askPIN('Enter It Again', 'The same six digits, to be sure.');
+    if (again !== next) { toast("The two PINs didn't match."); return; }
+    const ok = await LOCK.changePIN(current, next);
+    toast(ok ? 'PIN changed' : "That wasn't your current PIN.");
+  },
 };
+
+// ---------------------------------------------------------------------------
+// The app lock and this device's place among your devices (lock.js does the crypto)
+
+function lockNeedsSetup() { return !!S.session && !LOCK.enabled(); }
+
+LOCK.onLock = async () => {
+  clearInterval(autoSyncTimer);
+  S.session = null;
+  S.docs.clear();
+  S.dirty.clear();
+  S.meta = freshMeta();
+  if ($('#sheet-root').children.length) closeSheet();
+  bump();
+  render();
+};
+
+LOCK.onWipe = async (reason) => {
+  clearInterval(autoSyncTimer);
+  S.lastEmail = S.session?.email || S.lastEmail || '';
+  S.session = null;
+  S.docs.clear();
+  S.dirty.clear();
+  S.meta = freshMeta();
+  S.wipeNotice = reason || null;
+  if ($('#sheet-root').children.length) closeSheet();
+  bump();
+  history.replaceState(null, '', `${location.pathname}#/projects`);
+  render();
+};
+
+/** Reads what the device holds (sealed until now) and carries on where the app left off. */
+async function afterUnlock() {
+  await loadDeviceState();
+  bump();
+  render();
+  if (S.session) { syncNow(); startAutoSync(); }
+}
+
+function wireLockScreen() {
+  const root = $('#lock-screen');
+  if (!root) return;
+  const foot = $('.lock-foot', root);
+  foot.innerHTML = `${LOCK.bioEnabled() ? '<button type="button" class="btn primary" data-lock="bio">Unlock with Face ID</button>' : ''}
+    <button type="button" class="btn link danger" data-lock="forget">Sign out and erase this device…</button>`;
+  LOCK.wire(root, async (pin) => {
+    try {
+      if (await LOCK.unlockWithPIN(pin)) { await afterUnlock(); return null; }
+    } catch { return null; } // wiped: the welcome screen is up
+    const wait = LOCK.waitSeconds();
+    $('.lock-hint', root).textContent = wait > 0 ? `Wait ${wait} seconds before trying again.` : 'Enter your PIN.';
+    const left = LOCK.MAX_FAILED - LOCK.state.failed;
+    return wait > 0 ? `Wrong PIN. Wait ${wait} seconds.` : `Wrong PIN. ${left} ${left === 1 ? 'try' : 'tries'} left before this device is erased.`;
+  });
+  foot.addEventListener('click', async (e) => {
+    const b = e.target.closest('[data-lock]');
+    if (!b) return;
+    if (b.dataset.lock === 'bio') {
+      if (await LOCK.unlockWithBiometric()) await afterUnlock();
+      else toast("Face ID didn't unlock it. Use your PIN.");
+    } else if (b.dataset.lock === 'forget') {
+      if (!confirm('Sign out and erase everything Eagle Creek keeps on this device?\n\nYour books stay safe in the cloud. Changes made here that never uploaded would be lost.')) return;
+      await LOCK.wipe(null);
+    }
+  });
+}
+
+function wireLockSetup() {
+  const root = $('#lock-setup');
+  if (!root) return;
+  let first = null;
+  LOCK.wire(root, async (pin) => {
+    if (first === null) {
+      first = pin;
+      $('h1', root).textContent = 'Enter It Again';
+      $('.lock-hint', root).textContent = 'The same six digits, to be sure.';
+      return '';
+    }
+    if (pin !== first) {
+      first = null;
+      $('h1', root).textContent = 'Set a PIN';
+      $('.lock-hint', root).textContent = 'Six digits.';
+      return "They didn't match. Start again.";
+    }
+    $('.lock-hint', root).textContent = "Sealing what's on this device…";
+    await LOCK.setUp(pin, { email: S.session?.email || '', timeout: 120 });
+    if (await LOCK.bioPossible() && confirm('Unlock with Face ID / Touch ID too?\n\nYour PIN always works as well.')) {
+      const result = await LOCK.enrollBiometric(pin);
+      if (result === 'ok') toast('Face ID / Touch ID can unlock Eagle Creek');
+      else if (result !== 'cancelled') toast("Face ID isn't available for the app on this device; the PIN is used.");
+    }
+    render();
+    syncNow();
+    startAutoSync();
+    return null;
+  });
+}
+
+/** Asks for a PIN in a sheet; resolves to the six digits, or null when dismissed. */
+function askPIN(title, hint) {
+  return new Promise((resolve) => {
+    let done = false;
+    openSheet(lockKeypad('lock-ask', title, hint), (sheet) => {
+      LOCK.wire(sheet.querySelector('#lock-ask'), async (pin) => { done = true; closeSheet(); resolve(pin); return null; });
+    });
+    const watch = setInterval(() => { if (!$('#lock-ask')) { clearInterval(watch); if (!done) resolve(null); } }, 300);
+  });
+}
+
+function securitySettingsCard() {
+  const timeout = LOCK.config?.timeout ?? 120;
+  const bio = LOCK.bioEnabled();
+  return card('Security', `<div style="padding:0 16px 14px">
+    <div class="kv"><span>App lock</span><span>${LOCK.enabled() ? (bio ? 'PIN and Face ID' : 'PIN') : 'Off'}</span></div>
+    <div class="kv"><span>This device</span><span>${esc(deviceName())}</span></div>
+    <p class="note" style="margin-top:4px">Everything Eagle Creek keeps on this device is encrypted behind the lock; ten wrong PINs, or ${LOCK.EXPIRY_DAYS} days without unlocking, erase the device's copy. Your books stay in the cloud. Every device is listed, and can be signed out, in Eagle Creek Books on the Mac (Settings › Security).</p>
+    <div class="fs-head" style="margin-top:10px">Lock after being in the background</div>
+    <div class="segmented" role="radiogroup">${LOCK.TIMEOUTS.map(([sec, label]) => `<button data-act="lock-timeout" data-seconds="${sec}" class="${timeout === sec ? 'on' : ''}" role="radio" aria-checked="${timeout === sec}">${label.replace('After ', '')}</button>`).join('')}</div>
+    <div class="btn-row wrap" style="margin-top:10px">
+      <button class="btn" data-act="lock-bio">${bio ? 'Turn Off Face ID' : 'Use Face ID / Touch ID'}</button>
+      <button class="btn" data-act="lock-change-pin">Change PIN</button>
+      <button class="btn" data-act="lock-now">${icon('logout')}Lock Now</button>
+    </div>
+  </div>`);
+}
+
+/** This install's id among your devices (kept in the clear; it's only a name). */
+async function deviceID() {
+  let id = await rawIDB.get('kv', 'device');
+  if (!id) {
+    id = (crypto.randomUUID ? crypto.randomUUID() : [...crypto.getRandomValues(new Uint8Array(16))].map((b, i) => (i === 4 || i === 6 || i === 8 || i === 10 ? '-' : '') + b.toString(16).padStart(2, '0')).join('')).toLowerCase();
+    await rawIDB.set('kv', 'device', id);
+  }
+  return id;
+}
+
+function deviceName() {
+  const ua = navigator.userAgent;
+  const device = /iPad/.test(ua) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1) ? 'iPad' : /iPhone/.test(ua) ? 'iPhone' : /Android/.test(ua) ? 'Android phone' : /Macintosh/.test(ua) ? 'Mac' : /Windows/.test(ua) ? 'Windows PC' : 'Device';
+  const browser = isStandalone() ? 'Home Screen app' : /CriOS|Chrome/.test(ua) ? 'Chrome' : /Firefox|FxiOS/.test(ua) ? 'Firefox' : /Safari/.test(ua) ? 'Safari' : 'browser';
+  return `${device} (${browser})`;
+}
+
+function platformName() {
+  const ua = navigator.userAgent;
+  if (/iPhone|iPad|iPod/.test(ua) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1)) return 'iOS';
+  if (/Android/.test(ua)) return 'Android';
+  if (/Macintosh/.test(ua)) return 'macOS';
+  if (/Windows/.test(ua)) return 'Windows';
+  return 'Web';
+}
+
+/**
+ * This device's row among your devices (kind "device" in Eagle Creek Books' table): kept fresh
+ * every ten minutes, and obeyed when the Mac signs this device out. Resolves true when the
+ * device wiped itself.
+ */
+async function deviceCheckIn() {
+  if (S.ledgerUnavailable) return false;
+  const id = await deviceID();
+  const row = S.docs.get(id);
+  const justSignedIn = !!(await rawIDB.get('kv', 'device-fresh'));
+  if (row && !row.deleted && row.data.revokedAt && !justSignedIn) {
+    await LOCK.wipe('This device was signed out from your Mac (Eagle Creek Books › Settings › Security), so its copy of your books was erased. Sign in again to use it here.');
+    return true;
+  }
+  const now = stamp();
+  const data = row && !row.deleted ? clone(row.data) : { id: id.toUpperCase(), registeredAt: now, app: 'phone' };
+  const fresh = !justSignedIn && row && !data.revokedAt && now - (Number(data.lastSeenAt) || 0) < 600 && data.appVersion === APP_VERSION && data.lockEnabled === LOCK.enabled() && data.name === deviceName();
+  if (justSignedIn) await rawIDB.del('kv', 'device-fresh');
+  if (fresh) return false;
+  Object.assign(data, { name: deviceName(), app: 'phone', platform: platformName(), appVersion: APP_VERSION, lastSeenAt: now, lockEnabled: LOCK.enabled(), revokedAt: null });
+  await saveRecord('device', data, { upload: true });
+  return false;
+}
 
 document.addEventListener('click', (e) => {
   const el = e.target.closest('[data-act]');
@@ -2718,9 +2963,15 @@ window.addEventListener('hashchange', () => {
 });
 window.addEventListener('online', () => { renderHeader(); syncNow(); });
 window.addEventListener('offline', () => renderHeader());
-document.addEventListener('visibilitychange', () => {
-  if (document.visibilityState === 'visible') { if (!reloadForUpdate()) syncNow(); }
-  else flushLogSave();
+document.addEventListener('visibilitychange', async () => {
+  if (document.visibilityState === 'visible') {
+    // Back from the background: lock if it was away long enough (the setting), else carry on.
+    if (LOCK.enabled() && LOCK.key && LOCK.state.hiddenAt && Date.now() - LOCK.state.hiddenAt >= (LOCK.config.timeout || 0) * 1000) { await LOCK.lock(); return; }
+    if (!reloadForUpdate()) syncNow();
+  } else {
+    flushLogSave();
+    if (LOCK.enabled() && LOCK.key) { LOCK.state.hiddenAt = Date.now(); LOCK.saveState(); }
+  }
 });
 function reloadForUpdate() {
   if (!S.updateReady) return false;
@@ -2741,21 +2992,17 @@ async function boot() {
   // A setup link (#setup=…) fills in the Supabase details.
   const link = readSetupLink(location.hash);
   if (link) history.replaceState(null, '', `${location.pathname}#/projects`);
+  let locked = false;
   try {
-    if (link) await idb.set('kv', 'config', link);
-    S.config = (await idb.get('kv', 'config')) || null;
-    S.session = (await idb.get('kv', 'session')) || null;
-    const meta = await idb.get('kv', 'meta');
-    if (meta) {
-      S.dirty = new Set(meta.dirty || []);
-      delete meta.dirty;
-      S.meta = { ...freshMeta(), ...meta };
-      // 1.4.0 kept project edits as projectOps.
-      if (meta.projectOps) { for (const [k, v] of Object.entries(meta.projectOps)) S.meta.recordOps[k] = { kind: 'project', ...v }; delete S.meta.projectOps; }
-      // This version keeps more kinds of records: read everything once to pick up the older ones.
-      if (S.meta.kinds !== KINDS_KEY) { S.meta.cursor = null; S.meta.lastFull = 0; S.meta.kinds = KINDS_KEY; }
+    if (link) await rawIDB.set('kv', 'config', link);
+    S.config = (await rawIDB.get('kv', 'config')) || null;
+    await LOCK.load(rawIDB);
+    if (LOCK.isExpired()) {
+      await LOCK.wipe(`Eagle Creek wasn't unlocked on this device for ${LOCK.EXPIRY_DAYS} days, so its copy of your books was erased. Sign in again to download them.`);
     }
-    for (const [k, row] of await idb.all('docs')) S.docs.set(k, row);
+    // With a lock set up, what's stored stays sealed until the PIN (or Face ID) opens it.
+    locked = LOCK.isLocked();
+    if (!locked) await loadDeviceState();
   } catch (e) {
     $('#main').innerHTML = banner(`This browser won't let Eagle Creek save anything (${e.message}). Private browsing can cause this.`, 'var(--danger)');
     return;
@@ -2763,7 +3010,7 @@ async function boot() {
   S.ui.lastDay = new Date();
   bump();
   render();
-  if (S.session) { syncNow(); startAutoSync(); }
+  if (S.session && !locked && !lockNeedsSetup()) { syncNow(); startAutoSync(); }
   if ('serviceWorker' in navigator && location.protocol !== 'file:') {
     // A new version published to the site takes over when it's safe: not while you're typing or
     // in the middle of a form, so nothing is lost.
@@ -2779,4 +3026,23 @@ async function boot() {
   navigator.storage?.persist?.().catch(() => {});
 }
 
-boot();
+/** The sign-in, the sync bookkeeping and every record kept on the device. */
+async function loadDeviceState() {
+  S.session = (await idb.get('kv', 'session')) || null;
+  const meta = await idb.get('kv', 'meta');
+  if (meta) {
+    S.dirty = new Set(meta.dirty || []);
+    delete meta.dirty;
+    S.meta = { ...freshMeta(), ...meta };
+    // 1.4.0 kept project edits as projectOps.
+    if (meta.projectOps) { for (const [k, v] of Object.entries(meta.projectOps)) S.meta.recordOps[k] = { kind: 'project', ...v }; delete S.meta.projectOps; }
+    // This version keeps more kinds of records: read everything once to pick up the older ones.
+    if (S.meta.kinds !== KINDS_KEY) { S.meta.cursor = null; S.meta.lastFull = 0; S.meta.kinds = KINDS_KEY; }
+  }
+  S.docs.clear();
+  for (const [k, row] of await idb.all('docs')) S.docs.set(k, row);
+}
+
+// Once every script is in (the other modules define views app.js renders).
+if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', () => { boot(); });
+else boot();

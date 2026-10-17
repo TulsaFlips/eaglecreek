@@ -508,3 +508,24 @@ a.kv { color: inherit; }
 .email-text { white-space: pre-wrap; overflow-wrap: anywhere; font-size: 14.5px; max-height: 320px; overflow: auto; }
 ol.steps { margin: 6px 0 4px; padding-left: 20px; font-size: 14.5px; line-height: 1.45; }
 ol.steps li { margin-bottom: 5px; }
+
+/* ----- The app lock (lock.js): PIN pad on a plain page */
+.lock { display: flex; flex-direction: column; align-items: center; text-align: center; padding: calc(var(--safe-top) + 40px) 20px 30px; max-width: 360px; margin: 0 auto; min-height: 100vh; min-height: 100dvh; box-sizing: border-box; }
+.lock .logo { width: 72px; height: 72px; border-radius: 18px; margin-bottom: 14px; box-shadow: 0 2px 8px rgba(0, 0, 0, .15); }
+.lock h1 { font-family: var(--serif); font-size: 26px; margin: 0 0 6px; }
+.lock .lock-hint { color: var(--muted); font-size: 15px; margin: 0 0 22px; min-height: 20px; }
+.pin-dots { display: flex; gap: 14px; margin-bottom: 26px; }
+.pin-dots i { width: 14px; height: 14px; border-radius: 50%; border: 1.5px solid var(--leather); background: transparent; transition: background .12s; }
+.pin-dots i.on { background: var(--forest); border-color: var(--forest); }
+.keypad { display: grid; grid-template-columns: repeat(3, 74px); gap: 14px; justify-content: center; }
+.keypad button { width: 74px; height: 74px; border-radius: 50%; border: 1px solid var(--stroke); background: var(--card); font-size: 26px; font-weight: 500; color: var(--text); cursor: pointer; touch-action: manipulation; -webkit-tap-highlight-color: transparent; }
+.keypad button:active { background: var(--fill); }
+.keypad button[data-key="back"] { font-size: 22px; background: transparent; border-color: transparent; }
+.lock.busy .keypad { opacity: .5; pointer-events: none; }
+.lock-err { color: var(--danger); font-size: 14px; min-height: 20px; margin: 16px 0 0; }
+.lock-foot { display: flex; flex-direction: column; gap: 10px; margin-top: 18px; width: 100%; }
+.lock-foot .btn.link { color: var(--danger); }
+.lock.shake { animation: lockShake .35s; }
+@keyframes lockShake { 0%, 100% { transform: translateX(0); } 25% { transform: translateX(-8px); } 75% { transform: translateX(8px); } }
+.sheet .lock { min-height: 0; padding: 10px 16px 20px; }
+.sheet .lock .logo { display: none; }
