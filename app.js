@@ -6,7 +6,7 @@
  */
 'use strict';
 
-const APP_VERSION = '1.13.0';
+const APP_VERSION = '1.14.0';
 // The record kinds kept on this device. QuickBooks, bank imports and the rest stay on the Mac.
 // planSheet and planMark are the plan reader's scales and measurements (plans.js); the Mac app
 // leaves kinds it doesn't know alone.
@@ -335,6 +335,7 @@ const freshMeta = () => ({ cursor: null, lastFull: 0, lastSync: 0, ledgerCursor:
 const S = {
   config: null, // { url, key }
   session: null, // { accessToken, refreshToken, expiresAt, userID, email }
+  team: null, // this person's place on the team (team.js): { role, owner, access, disabled, username, name }
   docs: new Map(), // id (lowercase) -> { id, kind, deleted, data }
   dirty: new Set(), // ids with edits not uploaded yet
   meta: freshMeta(),
@@ -405,6 +406,7 @@ async function saveMeta() {
 
 /** Saves an edited or new record and queues it for upload (the Mac's saveRecord). */
 async function saveRecord(kind, data, { upload = true } = {}) {
+  if (!canEditRecord(kind, data)) throw refuseViewOnly(kind === 'file' && fileGoesWithBooks(data) ? 'transaction' : kind);
   const id = key(data.id);
   data.updatedAt = stampAfter(Math.max(Number(data.updatedAt) || 0, Number(S.docs.get(id)?.data?.updatedAt) || 0));
   const row = { id, kind, deleted: false, data };
@@ -418,6 +420,7 @@ async function saveRecord(kind, data, { upload = true } = {}) {
 }
 
 async function deleteRecord(kind, id) {
+  if (!canEditKind(kind)) throw refuseViewOnly(kind);
   const k = key(id);
   const row = { id: k, kind, deleted: true, data: { updatedAt: stampAfter(S.docs.get(k)?.data?.updatedAt) } };
   S.docs.set(k, row);
@@ -441,6 +444,7 @@ function applyRecordOps(data, ops) {
   return data;
 }
 async function editRecord(kind, id, ops) {
+  if (!canEditKind(kind)) throw refuseViewOnly(kind);
   const current = get(id);
   if (!current || S.docs.get(key(id))?.kind !== kind) { toast(kind === 'project' ? 'This project was deleted on the Mac.' : 'This was deleted on the Mac.'); return null; }
   const k = key(id);
@@ -525,6 +529,7 @@ function parseSession(obj, fallbackEmail) {
 }
 
 async function signIn(email, password) {
+  email = loginAddress(email);
   const data = await api('/auth/v1/token', {
     method: 'POST', query: [['grant_type', 'password']],
     headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email, password }),
@@ -536,6 +541,9 @@ async function signIn(email, password) {
   S.meta.lastFull = 0;
   await idb.set('kv', 'session', session);
   await saveMeta();
+  // What this person may see, before anything is shown.
+  S.team = null;
+  try { await loadMyAccess(session.accessToken); } catch { /* the first sync tries again */ }
   // A fresh sign-in on a device that was signed out from the Mac: its old row says "signed
   // out" until this device registers again, so that row isn't obeyed once more.
   await rawIDB.set('kv', 'device-fresh', true);
@@ -557,6 +565,11 @@ async function validSession(force = false) {
     await idb.set('kv', 'session', next);
     return next;
   } catch (e) {
+    if (e instanceof ApiError && [400, 401, 403].includes(e.status) && /banned/i.test(e.message)) {
+      // Turned off by the owner (Settings › Team): this device's copy goes.
+      await LOCK.wipe(TURNED_OFF_NOTICE);
+      throw new ApiError(401, 'The owner turned off your access to Eagle Creek.');
+    }
     if (e instanceof ApiError && [400, 401, 403].includes(e.status)) {
       // The sign-in ran out. Data on the device stays; signing in again picks up where it left off.
       S.lastEmail = s.email;
@@ -672,7 +685,7 @@ async function applyRemote(rows) {
 async function deleteStoredFiles(session) {
   for (const name of [...S.meta.storageDeletes]) {
     try {
-      await api(`/storage/v1/object/files/${session.userID}/${name}`, { method: 'DELETE', token: session.accessToken });
+      await api(`/storage/v1/object/files/${dataOwner()}/${name}`, { method: 'DELETE', token: session.accessToken });
     } catch (e) {
       if (!(e instanceof ApiError && (e.status === 400 || e.status === 404))) continue; // try again next sync
     }
@@ -685,8 +698,9 @@ let uploadedSomething = false;
 async function uploadFiles(session) {
   let failed = 0;
   let tooLarge = 0;
-  const owner = session.userID;
+  const owner = dataOwner();
   if (!owner) return null;
+  if (!canEdit('files')) return null;
   const queue = [...S.meta.uploads];
   for (const [index, fileId] of queue.entries()) {
     const pending = await idb.get('blobs', fileId);
@@ -728,6 +742,14 @@ async function pushChanges(token) {
   // looked: its newer copy is fetched, edits kept as steps are made again on it, and it goes
   // up again; any other edit gives way to the Mac's newer one, as on the Mac.
   const superseded = [];
+  // Changes to areas this person can't change never go up (the database would refuse them);
+  // the server's copies come back on the next full read.
+  let refused = 0;
+  for (const id of [...S.dirty]) {
+    const row = S.docs.get(id);
+    if (row && !row.deleted && !canEditRecord(row.kind, row.data)) { S.dirty.delete(id); delete S.meta.recordOps[id]; refused++; }
+    else if (row && row.deleted && !canEditKind(row.kind)) { S.dirty.delete(id); refused++; }
+  }
   for (let round = 0; round < 3; round++) {
     const ids = [...S.dirty].filter((id) => S.docs.has(id) && !S.meta.uploads.includes(id));
     if (!ids.length) break;
@@ -748,11 +770,21 @@ async function pushChanges(token) {
         if (table === LEDGER_TABLE) body.entity_id = row.data.entityID ? key(row.data.entityID) : null;
         return { id, stamp: row.data.updatedAt, deleted: row.deleted, body };
       });
-      const saved = await api(`/rest/v1/${table}`, {
-        method: 'POST', token, query: [['select', 'id']],
-        headers: { 'Content-Type': 'application/json', Prefer: 'resolution=merge-duplicates,return=representation' },
-        body: JSON.stringify(sent.map((x) => x.body)),
-      });
+      let saved;
+      try {
+        saved = await api(`/rest/v1/${table}`, {
+          method: 'POST', token, query: [['select', 'id']],
+          headers: { 'Content-Type': 'application/json', Prefer: 'resolution=merge-duplicates,return=representation' },
+          body: JSON.stringify(sent.map((x) => x.body)),
+        });
+      } catch (e) {
+        // The database's team rules turned these down (access changed since this device last
+        // looked): they're dropped here and the server's copies come back on the next read.
+        if (!(e instanceof ApiError && [401, 403].includes(e.status) && /row-level security|permission denied/i.test(e.message))) throw e;
+        for (const x of sent) { S.dirty.delete(x.id); delete S.meta.recordOps[x.id]; refused++; }
+        await saveMeta();
+        continue;
+      }
       // An older Supabase setup may not list them: then everything sent was taken.
       const took = Array.isArray(saved) ? new Set(saved.map((r) => key(r.id))) : null;
       const dels = [];
@@ -771,6 +803,13 @@ async function pushChanges(token) {
     }
     if (!turnedDown.length) break;
     superseded.push(...await takeNewerCopies(token, turnedDown));
+  }
+  if (refused) {
+    S.meta.cursor = null;
+    S.meta.lastFull = 0;
+    S.meta.ledgerCursor = null;
+    await saveMeta();
+    toast(refused === 1 ? "A change wasn't saved: your access doesn't include changing it." : `${refused} changes weren't saved: your access doesn't include changing them.`);
   }
   if (superseded.length) {
     const names = [...new Set(superseded)];
@@ -841,6 +880,9 @@ async function syncNow({ full = false } = {}) {
   uploadedSomething = false;
   try {
     let session = await validSession();
+    // Who this is on the team, first: what they may see decides what's read and kept.
+    if (await loadMyAccess(session.accessToken)) changed = true;
+    if (S.team?.disabled) { await LOCK.wipe(TURNED_OFF_NOTICE); return; }
     // Only what changed (with five minutes' overlap), and everything once a day as a safety net.
     let since = null;
     if (!full && S.meta.cursor && Date.now() / 1000 - (S.meta.lastFull || 0) < 86_400) since = S.meta.cursor - 300;
@@ -929,6 +971,7 @@ function photoName(date) {
 async function addFiles(fileList, { projectID = null, category = 'progressPhoto', recordID = null, needsReview = false, contactID = null, transactionID = null, drawID = null, ids = null } = {}) {
   const files = [...fileList];
   if (!files.length) return 0;
+  if (!canEdit('files')) { refuseViewOnly('file'); return 0; }
   toast(files.length === 1 ? 'Saving…' : `Saving ${files.length} files…`);
   let added = 0;
   for (const file of files) {
@@ -980,7 +1023,7 @@ async function fileBlob(f) {
   const cached = await idb.get('cache', ck);
   if (cached) return cached;
   const session = await validSession();
-  const res = await api(`/storage/v1/object/authenticated/files/${session.userID}/${storageName(f)}`, { token: session.accessToken, raw: true });
+  const res = await api(`/storage/v1/object/authenticated/files/${dataOwner()}/${storageName(f)}`, { token: session.accessToken, raw: true });
   const blob = await res.blob();
   const typed = blob.type && blob.type !== 'application/octet-stream' ? blob : new Blob([blob], { type: contentType(f.fileExtension) });
   try { await idb.set('cache', ck, typed); } catch { /* storage full: still show it */ }
@@ -1353,7 +1396,7 @@ function renderTabs(active) {
   if (!S.session) { nav.classList.add('hidden'); return; }
   nav.classList.remove('hidden');
   nav.innerHTML = `<div class="brand"><img src="icon-180.png" alt="">Eagle Creek</div>` +
-    TABS.map(([r, label, ic, tint, wideOnly]) => `<a href="#/${r}" class="${active === r ? 'on' : ''}${wideOnly ? ' wide-only' : ''}" style="--tint:${tint}" ${active === r ? 'aria-current="page"' : ''}>${icon(ic)}<span>${label}</span></a>`).join('');
+    TABS.filter(([r]) => canViewTab(r)).map(([r, label, ic, tint, wideOnly]) => `<a href="#/${r}" class="${active === r ? 'on' : ''}${wideOnly ? ' wide-only' : ''}" style="--tint:${tint}" ${active === r ? 'aria-current="page"' : ''}>${icon(ic)}<span>${label}</span></a>`).join('');
 }
 
 function render() {
@@ -1379,7 +1422,7 @@ function render() {
     if ($('#lock-setup')) return;
     $('#tabs').classList.add('hidden');
     $('#top').classList.add('hidden');
-    main.innerHTML = LOCK.setupHTML(S.session.email);
+    main.innerHTML = LOCK.setupHTML(loginName(S.session.email));
     wireLockSetup();
     render.lastHash = null;
     return;
@@ -1387,8 +1430,9 @@ function render() {
   const r = route();
   let html = '';
   let tab = r.name;
+  const tabOf = { project: 'projects', log: 'projects', contact: 'contacts', trip: 'trips' }[r.name] || (TAB_AREAS[r.name] ? r.name : 'projects');
   try {
-    switch (r.name) {
+    if (!canViewTab(tabOf)) { html = viewNoAccess(tabOf); tab = tabOf; } else switch (r.name) {
       case 'project': html = viewProject(r.a, r.b || 'overview'); tab = 'projects'; break;
       case 'log': html = viewLog(r.a); tab = 'projects'; break;
       case 'schedule': html = viewSchedule(); break;
@@ -1448,8 +1492,18 @@ const allClear = (text) => `<div class="all-clear">${icon('checkCircle')}${esc(t
 
 // ----- Welcome / sign in
 
+/** The project config.js names (built into this copy), or null. */
+function builtInProject() {
+  if (typeof BUILT_IN_PROJECT === 'undefined') return null;
+  const url = String(BUILT_IN_PROJECT.url || '').trim().replace(/\/+$/, '');
+  const key = String(BUILT_IN_PROJECT.key || '').trim();
+  return url && key ? { url, key } : null;
+}
+const usesBuiltInProject = () => { const b = builtInProject(); return !!b && (!S.config || S.config.url === b.url); };
+
 function viewWelcome() {
-  const c = S.config || {};
+  const builtIn = usesBuiltInProject();
+  const c = S.config || builtInProject() || {};
   const wiped = S.wipeNotice ? banner(S.wipeNotice, 'var(--slate)') : '';
   const homeHint = isIOS && !isStandalone()
     ? `<div class="banner" style="--c:var(--slate)">${icon('share')}<div>On iPhone and iPad, add Eagle Creek to your Home Screen first (Share → Add to Home Screen), then open it from there and sign in. The Home Screen app keeps its own sign-in.</div></div>` : '';
@@ -1460,25 +1514,30 @@ function viewWelcome() {
     ${wiped}
     ${homeHint}
     <form id="signin" autocomplete="on">
-      <div class="form-section"><div class="fs-head">${fsTitle('link', 'Supabase project')}</div><div class="form-card">
-        <label class="field"><span>Project URL, or paste a setup link</span><input name="url" type="url" inputmode="url" placeholder="https://xxxx.supabase.co" value="${esc(c.url || '')}" required autocapitalize="off" autocorrect="off" spellcheck="false"></label>
-        <label class="field"><span>Anon or publishable key</span><input name="key" placeholder="eyJ… or sb_publishable_…" value="${esc(c.key || '')}" required autocapitalize="off" autocorrect="off" spellcheck="false"></label>
-      </div></div>
+      ${builtIn ? '' : projectFields(c, true)}
       <div class="form-section"><div class="fs-head">${fsTitle('person', 'Your account')}</div><div class="form-card">
-        <label class="field"><span>Email</span><input name="email" type="email" autocomplete="username" required autocapitalize="off" value="${esc(S.lastEmail || '')}"></label>
+        <label class="field"><span>Username or email</span><input name="email" type="text" autocomplete="username" required autocapitalize="off" autocorrect="off" spellcheck="false" value="${esc(loginName(S.lastEmail || ''))}"></label>
         <label class="field"><span>Password</span><input name="password" type="password" autocomplete="current-password" required></label>
       </div></div>
       <div class="err-text" id="signin-err"></div>
       <button class="btn primary block" type="submit">Sign In</button>
-      <details class="help"><summary>Where do I find these?</summary>
+      ${builtIn ? `<details class="help"><summary>Use a different Supabase project</summary>${projectFields(c, false)}</details>` : ''}
+      <details class="help"><summary>${builtIn ? 'Signing in' : 'Where do I find these?'}</summary>
         <ol>
-          <li>Use the email and password you sync with in the Mac app.</li>
+          <li>Use the username and password the owner gave you, or the owner's email and password. There's no way to make an account here: the owner adds people in Eagle Creek on the Mac (Settings › Team).</li>
           <li>The URL and key are in the Mac app under Settings → Cloud Sync. They're also on supabase.com: open your project, then <b>Connect</b> or Project Settings → API Keys. Use the anon or publishable key, never the secret or service_role key.</li>
           <li>Once one device is set up, Settings → <b>Set Up Another Device</b> makes a link. Paste it into the first box and the URL and key fill in.</li>
         </ol>
       </details>
     </form>
   </div>`;
+}
+
+function projectFields(c, required) {
+  return `<div class="form-section"><div class="fs-head">${fsTitle('link', 'Supabase project')}</div><div class="form-card">
+        <label class="field"><span>Project URL, or paste a setup link</span><input name="url" type="url" inputmode="url" placeholder="https://xxxx.supabase.co" value="${esc(c.url || '')}" ${required ? 'required' : ''} autocapitalize="off" autocorrect="off" spellcheck="false"></label>
+        <label class="field"><span>Anon or publishable key</span><input name="key" placeholder="eyJ… or sb_publishable_…" value="${esc(c.key || '')}" ${required ? 'required' : ''} autocapitalize="off" autocorrect="off" spellcheck="false"></label>
+      </div></div>`;
 }
 
 /** A setup link (…#setup=…) holds the Supabase URL and key. */
@@ -1518,7 +1577,7 @@ function projectRow(p) {
 }
 
 function viewProjects() {
-  setHeader({ title: 'Projects', actions: `<button class="icon-btn" data-act="receipt" aria-label="Snap a receipt" title="Snap a receipt">${icon('receipt')}</button>${isWide() ? '' : `<a class="icon-btn" href="#/mail" aria-label="Email archive" title="Email archive">${icon('mail')}</a><a class="icon-btn" href="#/settings" aria-label="Settings" title="Settings">${icon('settings')}</a>`}` });
+  setHeader({ title: 'Projects', actions: `<button class="icon-btn" data-act="receipt" aria-label="Snap a receipt" title="Snap a receipt">${icon('receipt')}</button>${isWide() ? '' : `${canViewTab('mail') ? `<a class="icon-btn" href="#/mail" aria-label="Email archive" title="Email archive">${icon('mail')}</a>` : ''}<a class="icon-btn" href="#/settings" aria-label="Settings" title="Settings">${icon('settings')}</a>`}` });
   let html = '';
   if (S.syncError) html += banner(S.syncError);
   html += `<div class="search">${icon('search')}<input class="input" id="project-search" type="search" placeholder="Find a project" value="${esc(S.ui.search)}" autocomplete="off"></div>`;
@@ -2078,11 +2137,15 @@ function viewSettings() {
         : 'In Chrome, open the <b>⋮</b> menu and choose <b>Add to Home screen</b> (Android) or <b>Cast, save and share → Install page as app</b> (computer).';
     html += card('Add to Home Screen', `<div style="padding:0 16px 14px;font-size:15px">${how}</div>`);
   }
+  const builtIn = usesBuiltInProject();
   html += card('Account', `<div style="padding:0 16px 14px">
-    <div class="kv"><span>Signed in as</span><span>${esc(S.session?.email || '')}</span></div>
+    <div class="kv"><span>Signed in as</span><span>${esc(loginName(S.session?.email || ''))}</span></div>
+    ${S.team?.name ? `<div class="kv"><span>Name</span><span>${esc(S.team.name)}</span></div>` : ''}
+    <div class="kv"><span>Role</span><span>${isMember() ? 'Team member' : 'Owner'}</span></div>
     <div class="kv"><span>Supabase</span><span>${esc((S.config?.url || '').replace(/^https?:\/\//, ''))}</span></div>
-    <button class="btn block" data-act="setup-link" style="margin-top:6px">${icon('share')}Set Up Another Device</button>
-    <p class="note">Makes a link with your Supabase URL and key. On the other phone or iPad, paste it into the first box on the sign-in screen, then sign in with your email and password.</p>
+    ${accessSummaryHTML()}
+    ${builtIn ? '<p class="note">On another phone or iPad, open this site and sign in with your username (or email) and password.</p>' : `<button class="btn block" data-act="setup-link" style="margin-top:6px">${icon('share')}Set Up Another Device</button>
+    <p class="note">Makes a link with your Supabase URL and key. On the other phone or iPad, paste it into the first box on the sign-in screen, then sign in with your username (or email) and password.</p>`}
   </div>`);
   if (typeof mailSettingsCard === 'function') html += mailSettingsCard();
   html += securitySettingsCard();
@@ -2627,6 +2690,7 @@ function lockNeedsSetup() { return !!S.session && !LOCK.enabled(); }
 LOCK.onLock = async () => {
   clearInterval(autoSyncTimer);
   S.session = null;
+  S.team = null;
   S.docs.clear();
   S.dirty.clear();
   S.meta = freshMeta();
@@ -2639,6 +2703,7 @@ LOCK.onWipe = async (reason) => {
   clearInterval(autoSyncTimer);
   S.lastEmail = S.session?.email || S.lastEmail || '';
   S.session = null;
+  S.team = null;
   S.docs.clear();
   S.dirty.clear();
   S.meta = freshMeta();
@@ -2819,6 +2884,10 @@ document.addEventListener('submit', async (e) => {
       err.textContent = '';
       const link = readSetupLink(form.elements.url.value);
       if (link) { form.elements.url.value = link.url; form.elements.key.value = link.key; }
+      const login = form.elements.email.value.trim();
+      if (!login.includes('@') && !validUsername(login)) { err.textContent = "That isn't a username. A username is letters and numbers (dashes and underscores too), or sign in with an email."; return; }
+      const builtIn = builtInProject();
+      if (builtIn && !form.elements.url.value.trim()) { form.elements.url.value = builtIn.url; form.elements.key.value = builtIn.key; }
       let url = form.elements.url.value.trim();
       if (url && !/^https?:\/\//.test(url)) url = `https://${url}`;
       try { url = new URL(url).origin; } catch { err.textContent = "That doesn't look like a Supabase project URL."; return; }
@@ -2832,7 +2901,7 @@ document.addEventListener('submit', async (e) => {
       btn.textContent = 'Signing in…';
       try {
         await idb.set('kv', 'config', S.config);
-        await signIn(form.elements.email.value.trim(), form.elements.password.value);
+        await signIn(login, form.elements.password.value);
         history.replaceState(null, '', `${location.pathname}#/projects`);
         render();
         syncNow({ full: true });
@@ -2995,7 +3064,7 @@ async function boot() {
   let locked = false;
   try {
     if (link) await rawIDB.set('kv', 'config', link);
-    S.config = (await rawIDB.get('kv', 'config')) || null;
+    S.config = (await rawIDB.get('kv', 'config')) || builtInProject() || null;
     await LOCK.load(rawIDB);
     if (LOCK.isExpired()) {
       await LOCK.wipe(`Eagle Creek wasn't unlocked on this device for ${LOCK.EXPIRY_DAYS} days, so its copy of your books was erased. Sign in again to download them.`);
@@ -3029,6 +3098,7 @@ async function boot() {
 /** The sign-in, the sync bookkeeping and every record kept on the device. */
 async function loadDeviceState() {
   S.session = (await idb.get('kv', 'session')) || null;
+  S.team = (await idb.get('kv', 'team')) || null;
   const meta = await idb.get('kv', 'meta');
   if (meta) {
     S.dirty = new Set(meta.dirty || []);

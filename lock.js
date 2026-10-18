@@ -14,7 +14,7 @@ const LOCK = {
   config: null, // { v, pin: {salt, iter, iv, wrapped}, bio: {credID, salt, iv, wrapped} | null, timeout, email }
   state: { failed: 0, nextTryAt: 0, lastUnlockAt: 0, hiddenAt: 0 }, // plain, so a locked app can read it
   ENC_STORES: new Set(['docs', 'blobs', 'cache']),
-  ENC_KV: new Set(['session', 'meta']),
+  ENC_KV: new Set(['session', 'meta', 'team']),
   PIN_ITERATIONS: 310_000,
   MAX_FAILED: 10,
   EXPIRY_DAYS: 14,
@@ -208,7 +208,7 @@ LOCK.wipe = async (reason) => {
   LOCK.state = { failed: 0, nextTryAt: 0, lastUnlockAt: 0, hiddenAt: 0 };
   const raw = LOCK.raw;
   for (const store of ['docs', 'blobs', 'cache']) await raw.clear(store);
-  for (const k of ['session', 'meta', LOCK_KV.config, LOCK_KV.state]) await raw.del('kv', k);
+  for (const k of ['session', 'meta', 'team', LOCK_KV.config, LOCK_KV.state]) await raw.del('kv', k);
   if (LOCK.onWipe) await LOCK.onWipe(reason);
 };
 
