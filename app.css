@@ -83,6 +83,8 @@ nav.tabs a.on .ic { opacity: 1; }
 /* iPad landscape and computers: a sidebar, like the Mac. */
 @media (min-width: 900px) {
   #app { padding-left: 232px; }
+  /* No sidebar (signed out, locked, setting a PIN): the page sits in the middle. */
+  #app:has(> #tabs.hidden) { padding-left: 0; }
   nav.tabs {
     top: 0; bottom: 0; right: auto; width: 232px; flex-direction: column; justify-content: flex-start; gap: 2px;
     padding: calc(var(--safe-top) + 16px) 10px 16px; border-top: 0; border-right: 1px solid var(--divider);
