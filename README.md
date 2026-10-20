@@ -291,6 +291,14 @@ People the owner adds in Eagle Creek on the Mac (Settings › Team) sign in here
 - **Files** live in the owner's folder, whoever adds them.
 - Works with a Supabase project that hasn't set up the team yet (everything, as before).
 
+## Approving Claude (connect.html)
+
+`connect.html` is where you approve the Claude connector (Eagle Creek's `supabase/functions/eaglecreek-mcp`; the Mac README › The Claude connector has the setup). When you click Connect in Claude, Supabase sends you here (Authentication › OAuth Server › Authorization Path = `/connect.html`). Sign in as Claude's own team member (`claude`), check the access it lists, and click Allow or Deny.
+
+- Only an enabled team member can approve; the owner's own sign-in is refused before the request is even read, so Claude never works as the owner.
+- The sign-in lives only in the page's memory and is signed out (that session only) once the answer is sent. Nothing is stored in the browser.
+- It warns when the app asking doesn't return to claude.ai, shows names as plain text, and won't work inside another page.
+
 ## The lock (1.13.0)
 
 Right after signing in, the app asks for a **six-digit PIN**, and offers **Face ID / Touch ID**
