@@ -6,6 +6,6 @@
 //
 // Left blank, the sign-in screen asks for the URL and key (or a setup link) as before.
 const BUILT_IN_PROJECT = {
-  url: '',
-  key: '',
+  url: 'https://jyylfwjfsqgypwabuswq.supabase.co',
+  key: 'sb_publishable_g4F1JqIWKsi1Yb0eUYZ5_w_IMGO6TBZ',
 };

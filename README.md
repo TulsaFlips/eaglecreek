@@ -285,7 +285,7 @@ Mac app's Settings → Cloud Sync and run `supabase/setup.sql` in the Supabase S
 People the owner adds in Eagle Creek on the Mac (Settings › Team) sign in here with a **username and password**. Each sees only what the owner allows (None, View or Edit for Projects & Schedule, Files & Photos, Contacts, Budgets & Contracts, Timesheets, Books & Banking, Trips & Mileage). Tabs they can't see are gone, pages outside their access say so, and a change they can't make is stopped with a note. The database enforces all of it (Eagle Creek's `supabase/setup.sql`), so it holds whatever the phone does. There's no way to make an account here.
 
 - **Signing in.** Type a username (it signs in as `<username>@team.eaglecreek.invalid`, an address that never gets mail) or an email.
-- **Built-in project.** With the project URL and publishable key in `config.js`, the sign-in screen asks only for the username and password. Left blank, it asks for the URL and key (or a setup link) as before.
+- **Built-in project (1.14.1).** The project URL and publishable key are in `config.js`, so the sign-in screen asks only for a username (or email) and password; "Use a different Supabase project" under the button is still there. Blank them out and it asks for the URL and key (or a setup link) as before.
 - **Settings** shows who's signed in, their role and, for a member, what they may see and change.
 - **Access changed or turned off.** Records of an area taken away leave the phone on the next sync; an area given back comes back. Turned off by the owner, the phone erases its copy and can't sign in again.
 - **Files** live in the owner's folder, whoever adds them.
