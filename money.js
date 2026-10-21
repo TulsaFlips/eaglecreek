@@ -33,6 +33,7 @@ const TXN_TYPE_FILTERS = [
   ['all', 'All types', () => true], ['moneyOut', 'Money out', (t) => t === 'bill' || t === 'expense'], ['bills', 'Bills', (t) => t === 'bill'],
   ['expenses', 'Expenses', (t) => t === 'expense'], ['moneyIn', 'Money in', (t) => t === 'invoice' || t === 'deposit'], ['invoices', 'Invoices', (t) => t === 'invoice'],
   ['deposits', 'Deposits', (t) => t === 'deposit'], ['transfers', 'Transfers', (t) => t === 'transfer'], ['journal', 'Journal entries', (t) => t === 'journal'],
+  ['credits', 'Credits & refunds', (t) => t === 'vendorCredit' || t === 'creditMemo' || t === 'refund'],
 ];
 const TXN_STATUS_FILTERS = [
   ['all', 'Any status', () => true], ['open', 'Unpaid', (t) => txnOpen(t)], ['overdue', 'Overdue', (t) => txnOverdue(t)],
@@ -67,11 +68,12 @@ function ledgerTxnRow(t, { showProject = true } = {}) {
   const name = booksData().payeeName(t) || TXN_TYPES[t.type] || 'Transaction';
   const sub = [`${TXN_TYPES[t.type] || ''}${(t.number || '').trim() ? ` ${t.number.trim()}` : ''}`, showProject ? projectLabel(t.projectID) : '', categorySummary(t)].filter(Boolean).join(' · ');
   const open = txnOpen(t) && txnBalance(t) !== txnTotal(t);
-  const showPill = tracksBalance(t) || t.isVoid;
+  const left = creditLeft(t);
+  const showPill = tracksBalance(t) || isCredit(t) || t.isVoid;
   return `<button class="row" data-act="txn-open" data-id="${esc(key(t.id))}">
     <div class="ev-time">${esc(fmt.short(fromSec(t.date)))}</div>
     <div class="main"><div class="t ${t.isVoid ? 'done-t' : ''}">${esc(name)}</div><div class="s">${esc(sub)}</div>${tagChips(t)}</div>
-    <div class="end"><span class="amt">${esc(fmt.money(txnTotal(t), true))}</span>${open ? `<span>${esc(fmt.money(txnBalance(t), true))} due</span>` : ''}${showPill ? pill(TXN_STATUS[st][0], TXN_STATUS[st][1]) : ''}</div></button>`;
+    <div class="end"><span class="amt">${esc(fmt.money(txnTotal(t), true))}</span>${open ? `<span>${esc(fmt.money(txnBalance(t), true))} due</span>` : left > 0.005 && left !== txnTotal(t) ? `<span>${esc(fmt.money(left, true))} left</span>` : ''}${showPill ? pill(TXN_STATUS[st][0], TXN_STATUS[st][1]) : ''}</div></button>`;
 }
 
 // ----- Eagle Creek Books (v1.3): tags, and money recorded in both the business and personal books
@@ -353,7 +355,7 @@ function viewAccount(id) {
   html += `<section class="card flush">${shown.map(({ p, change, balance }) => {
     const t = p.isOpeningBalance ? null : get(p.transactionID);
     const name = p.payee || (p.isOpeningBalance ? 'Opening balance' : (TXN_TYPES[p.type] || ''));
-    const label = p.isOpeningBalance ? '' : p.paymentID ? `${p.type === 'invoice' ? 'Invoice payment' : 'Bill payment'}${p.number ? ` · ${p.number}` : ''}` : `${TXN_TYPES[p.type] || ''}${p.number ? ` ${p.number}` : ''}`;
+    const label = p.isOpeningBalance ? '' : p.paymentID ? `${p.type === 'invoice' ? 'Invoice payment' : p.type === 'bill' ? 'Bill payment' : 'Refund'}${p.number ? ` · ${p.number}` : ''}` : `${TXN_TYPES[p.type] || ''}${p.number ? ` ${p.number}` : ''}`;
     const sub = [label, (p.memo || '').trim(), p.projectID ? projectLabel(p.projectID) : ''].filter(Boolean).join(' · ');
     return `<${t ? `button class="row" data-act="txn-open" data-id="${esc(key(t.id))}"` : 'div class="row static"'}>
       <div class="ev-time">${esc(fmt.short(fromSec(p.date)))}</div>
@@ -441,7 +443,7 @@ function reportBody(kind, scope) {
     if (!r.rows.length) return emptyState('checkCircle', kind === 'ap' ? 'No Unpaid Bills' : 'Nothing Owed to You', 'Nothing was open on that date.');
     let html = `<div class="tiles aging">${AGING_BUCKETS.map((b, i) => tile(b, fmt.money(r.totals[i]), '', { accent: i === 0 ? 'var(--forest)' : i >= 3 ? 'var(--danger)' : 'var(--warning)' })).join('')}</div>`;
     for (const row of r.rows) {
-      html += card(row.name, row.items.map((i) => `<button class="row" data-act="txn-open" data-id="${esc(key(i.id))}"><div class="main"><div class="t">${esc(`${kind === 'ap' ? 'Bill' : 'Invoice'}${i.number ? ` ${i.number}` : ''}`)}</div><div class="s">${esc([fmt.date(fromSec(i.date)), i.daysPastDue > 0 ? `${plural(i.daysPastDue, 'day')} late` : `Due ${fmt.short(fromSec(i.dueDate))}`, scope === 'all' ? projectLabel(i.projectID) : ''].filter(Boolean).join(' · '))}</div></div><div class="end"><span class="amt" style="${i.daysPastDue > 0 ? 'color:var(--danger)' : ''}">${esc(fmt.money(i.balance, true))}</span></div></button>`).join(''),
+      html += card(row.name, row.items.map((i) => agingItemRow(i, kind, scope)).join(''),
         { action: `<span class="card-total">${esc(fmt.money(row.total, true))}</span>` });
     }
     return html + kvCard('Total', kvTotal(kind === 'ap' ? 'Bills to pay' : 'Owed to you', fmt.money(r.total, true)));
@@ -466,6 +468,14 @@ function reportBody(kind, scope) {
   if (kind === 'jobCost' && p) return jobCostReport(p);
   if (kind === 'drawRecon' && p) return drawReconReport(p);
   return '';
+}
+
+/** One bill or invoice on an aging report, or a credit not used yet (it counts against them). */
+function agingItemRow(i, kind, scope) {
+  const late = !i.isCredit && i.daysPastDue > 0;
+  const what = i.isCredit ? (kind === 'ap' ? 'Vendor credit' : 'Credit memo') : (kind === 'ap' ? 'Bill' : 'Invoice');
+  const when = i.isCredit ? 'Not used yet' : late ? `${plural(i.daysPastDue, 'day')} late` : `Due ${fmt.short(fromSec(i.dueDate))}`;
+  return `<button class="row" data-act="txn-open" data-id="${esc(key(i.id))}"><div class="main"><div class="t">${esc(`${what}${i.number ? ` ${i.number}` : ''}`)}</div><div class="s">${esc([fmt.date(fromSec(i.date)), when, scope === 'all' ? projectLabel(i.projectID) : ''].filter(Boolean).join(' · '))}</div></div><div class="end"><span class="amt" style="${late ? 'color:var(--danger)' : ''}">${esc(fmt.money(i.balance, true))}</span></div></button>`;
 }
 
 function viewReport(kind, scope, back) {

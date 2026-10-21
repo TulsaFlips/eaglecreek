@@ -37,21 +37,30 @@ const contactDisplayName = (c) => (c?.name || '').trim() || `Unnamed ${contactKi
 // Halves round away from zero, like the Mac (Math.round alone takes -2.5 to -2).
 const money = (v) => { const n = Number(v); return Number.isFinite(n) ? Math.sign(n) * Math.round(Math.abs(n) * 100) / 100 : 0; };
 fmt.money = (v, cents = false) => (Number(v) || 0).toLocaleString('en-US', { style: 'currency', currency: 'USD', minimumFractionDigits: cents ? 2 : 0, maximumFractionDigits: cents ? 2 : 0 });
-const TXN_TYPES = { bill: 'Bill', expense: 'Expense', invoice: 'Invoice', deposit: 'Deposit', transfer: 'Transfer', journal: 'Journal Entry' };
+const TXN_TYPES = {
+  bill: 'Bill', expense: 'Expense', invoice: 'Invoice', deposit: 'Deposit', transfer: 'Transfer', journal: 'Journal Entry',
+  vendorCredit: 'Vendor Credit', creditMemo: 'Credit Memo', refund: 'Refund',
+};
 const TXN_STATUS = {
   draft: ['Draft', 'var(--stone)'], open: ['Unpaid', 'var(--slate)'], partial: ['Partly paid', 'var(--warning)'],
   overdue: ['Overdue', 'var(--danger)'], paid: ['Paid', 'var(--success)'], posted: ['Recorded', 'var(--stone)'], void: ['Void', 'var(--stone)'],
+  // Vendor credits and credit memos (Mac v1.4.2): none of it used yet, some, or all of it.
+  unapplied: ['Unapplied', 'var(--slate)'], partlyApplied: ['Partly applied', 'var(--warning)'], applied: ['Applied', 'var(--success)'],
 };
 const WAIVER = { needed: 'Needed', conditional: 'Conditional', unconditional: 'Received', notRequired: 'N/A' };
 const METHODS = { check: 'Check', ach: 'ACH', wire: 'Wire', card: 'Card', cash: 'Cash', zelle: 'Zelle / Venmo', other: 'Other' };
 const tracksBalance = (t) => t.type === 'bill' || t.type === 'invoice';
+/** Vendor credits and credit memos: applied to bills or invoices, or refunded (made on the Mac). */
+const isCredit = (t) => t.type === 'vendorCredit' || t.type === 'creditMemo';
+/** Invoices, credit memos and refunds: items sold, with sales tax. */
+const isSalesForm = (t) => t.type === 'invoice' || t.type === 'creditMemo' || t.type === 'refund';
 function txnSubtotal(t) {
   const lines = t.lines || [];
   if (t.type === 'journal') return money(lines.reduce((s, l) => s + Math.max(0, money(l.amount)), 0));
   return money(lines.reduce((s, l) => s + money(l.amount), 0));
 }
 function txnTax(t) {
-  if (t.type !== 'invoice' || !(t.taxPct > 0)) return 0;
+  if (!isSalesForm(t) || !(t.taxPct > 0)) return 0;
   const taxable = money((t.lines || []).filter((l) => l.taxable !== false).reduce((s, l) => s + money(l.amount), 0));
   return money(taxable * t.taxPct / 100);
 }
@@ -62,8 +71,30 @@ const txnDue = (t) => money(txnTotal(t) - txnRetainage(t));
 const txnBalance = (t) => (!tracksBalance(t) || t.isVoid ? 0 : money(txnDue(t) - txnPaid(t)));
 const txnOpen = (t) => tracksBalance(t) && !t.isVoid && txnBalance(t) > 0.005;
 const txnOverdue = (t) => txnOpen(t) && t.dueDate != null && sod(fromSec(t.dueDate)) < sod(new Date());
+/** What's been applied of each vendor credit (credit memo), by its id: payments on bills (invoices)
+ * that aren't void and name it, on days in `range` (the Mac's CreditIndex). */
+function creditApplied(range = null) {
+  const cache = fresh().cache;
+  if (!range && cache.has('creditApplied')) return cache.get('creditApplied');
+  const applied = new Map();
+  for (const t of all('transaction')) {
+    if (!tracksBalance(t) || t.isVoid) continue;
+    for (const p of t.payments || []) {
+      if (!p.creditID || (range && !inRange(range, p.date || 0))) continue;
+      applied.set(key(p.creditID), money((applied.get(key(p.creditID)) || 0) + money(p.amount)));
+    }
+  }
+  if (!range) cache.set('creditApplied', applied);
+  return applied;
+}
+/** What's left of a vendor credit or credit memo: its total, less refunds and what's applied. */
+const creditLeft = (t) => (!isCredit(t) || t.isVoid ? 0 : money(txnTotal(t) - txnPaid(t) - (creditApplied().get(key(t.id)) || 0)));
 function txnStatus(t) {
   if (t.isVoid) return 'void';
+  if (isCredit(t)) {
+    const left = creditLeft(t);
+    return left <= 0.005 ? 'applied' : left < txnTotal(t) - 0.005 ? 'partlyApplied' : 'unapplied';
+  }
   if (!tracksBalance(t)) return 'posted';
   if (txnDue(t) <= 0.005 && !(t.payments || []).length) return t.type === 'invoice' && t.sentDate == null ? 'draft' : 'open';
   if (txnBalance(t) <= 0.005) return 'paid';
@@ -75,7 +106,8 @@ function txnStatus(t) {
 /** Money paid to the vendor on a bill or expense, each with its lien waiver. */
 function vendorPayments(t) {
   if (t.isVoid) return [];
-  if (t.type === 'bill') return (t.payments || []).map((p) => ({ date: p.date, amount: money(p.amount), method: p.method, reference: p.reference, waiver: p.waiver || {} }));
+  // (A credit taken off a bill moves no money.)
+  if (t.type === 'bill') return (t.payments || []).filter((p) => !isCreditApplication(p, booksData().sys)).map((p) => ({ date: p.date, amount: money(p.amount), method: p.method, reference: p.reference, waiver: p.waiver || {} }));
   if (t.type === 'expense') return [{ date: t.date, amount: txnTotal(t), method: t.method, reference: t.number, waiver: t.waiver || {} }];
   return [];
 }
@@ -127,7 +159,7 @@ function contactProjects(cid) {
   const add = (pid, r) => { if (!pid) return; const k = key(pid); if (!roles.has(k)) roles.set(k, new Set()); roles.get(k).add(r); };
   for (const p of projects()) if (sameId(p.customerID, cid)) add(p.id, 0);
   for (const c of all('commitment')) if (sameId(c.contactID, cid)) add(c.projectID, c.kind === 'purchaseOrder' ? 2 : 1);
-  for (const t of all('transaction')) if (sameId(t.contactID, cid)) { if (t.type === 'bill' || t.type === 'expense') add(t.projectID, 3); if (t.type === 'invoice') add(t.projectID, 4); }
+  for (const t of all('transaction')) if (sameId(t.contactID, cid)) { if (t.type === 'bill' || t.type === 'expense' || t.type === 'vendorCredit') add(t.projectID, 3); if (isSalesForm(t)) add(t.projectID, 4); }
   for (const t of all('task')) if (sameId(t.contactID, cid)) add(t.projectID, 5);
   return projects().filter((p) => roles.has(key(p.id)))
     .sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0))
@@ -197,7 +229,9 @@ function viewContacts() {
 function txnRow(t) {
   const st = txnStatus(t);
   const p = t.projectID ? project(t.projectID) : null;
-  const amount = tracksBalance(t) && txnOpen(t) && txnBalance(t) !== txnTotal(t) ? `${fmt.money(txnBalance(t), true)} due` : fmt.money(txnTotal(t), true);
+  const left = creditLeft(t);
+  const amount = tracksBalance(t) && txnOpen(t) && txnBalance(t) !== txnTotal(t) ? `${fmt.money(txnBalance(t), true)} due`
+    : left > 0.005 && left !== txnTotal(t) ? `${fmt.money(left, true)} left` : fmt.money(txnTotal(t), true);
   return `<button class="row" data-act="txn-open" data-id="${esc(key(t.id))}">
     <div class="main"><div class="t">${esc(txnLabel(t))}</div><div class="s">${esc([p ? projectName(p) : 'Company', fmt.date(fromSec(t.date))].join(' · '))}</div></div>
     <div class="end"><span class="num" style="color:var(--text);font-size:15px">${esc(amount)}</span>${pill(TXN_STATUS[st][0], TXN_STATUS[st][1])}</div></button>`;
@@ -277,13 +311,14 @@ function viewContact(id) {
     html += `<div class="tiles" style="grid-template-columns:repeat(2,1fr)">${tile('Hours This Year', String(Math.round(hours * 10) / 10), plural(entries.length, 'day'), { accent: 'var(--forest)' })}${tile('Labor Cost This Year', fmt.money(cost), 'Wages plus burden', { accent: 'var(--leather)' })}</div>`;
   } else if (txns.length) {
     const customer = c.kind === 'customer';
-    const paidYear = customer
-      ? txns.filter((t) => t.type === 'invoice' && !t.isVoid).flatMap((t) => t.payments || []).filter((p) => inThisYear(p.date)).reduce((s, p) => s + money(p.amount), 0)
-      : txns.flatMap(vendorPayments).filter((p) => inThisYear(p.date)).reduce((s, p) => s + p.amount, 0);
-    const open = txns.filter(txnOpen).reduce((s, t) => s + txnBalance(t), 0);
+    const paidYear = customer ? receivedThisYear(txns) : txns.flatMap(vendorPayments).filter((p) => inThisYear(p.date)).reduce((s, p) => s + p.amount, 0);
+    // Credits not used yet count against what's owed (as on the aging reports).
+    const credits = money(txns.reduce((s, t) => s + creditLeft(t), 0));
+    const open = money(txns.filter(txnOpen).reduce((s, t) => s + txnBalance(t), 0) - credits);
+    const openNote = plural(txns.filter(txnOpen).length, 'open item') + (credits > 0.005 ? `, after ${fmt.money(credits)} in credits` : '');
     const tiles = [
       tile(customer ? 'Received This Year' : 'Paid This Year', fmt.money(paidYear), '', { accent: 'var(--forest)' }),
-      tile(customer ? 'They Owe You' : 'You Owe Them', fmt.money(open), plural(txns.filter(txnOpen).length, 'open item'), { accent: customer ? 'var(--slate)' : 'var(--leather)' }),
+      tile(customer ? 'They Owe You' : 'You Owe Them', fmt.money(open), openNote, { accent: customer ? 'var(--slate)' : 'var(--leather)' }),
     ];
     if (c.requiresLienWaivers) {
       const missing = txns.flatMap(vendorPayments).filter((p) => !['unconditional', 'notRequired'].includes(p.waiver.status || 'needed'));
@@ -355,6 +390,20 @@ function viewContact(id) {
   html += card('Details', `<div style="padding:0 16px 8px">${rows.join('') || '<div class="empty-line" style="padding:4px 0 10px">Nothing filled in yet.</div>'}${w9Gap ? '<p class="note" style="margin:8px 0 4px">The W-9’s taxpayer ID and tax classification go in Eagle Creek Books (Vendors & Customers) for the 1099.</p>' : ''}</div>`, { action: `<button class="btn link" data-act="contact-edit" data-id="${cid}">Edit</button>` });
   if ((c.notes || '').trim()) html += card('Notes', `<div style="white-space:pre-wrap;overflow-wrap:anywhere">${esc(c.notes)}</div>`, { flush: false });
   return html;
+}
+
+/** Money a customer paid this year: invoice payments (not credits taken off them), less money
+ * paid back to them (credit memo refunds and refunds). */
+function receivedThisYear(txns) {
+  const sys = booksData().sys;
+  let total = 0;
+  for (const t of txns) {
+    if (t.isVoid) continue;
+    if (t.type === 'refund') { if (inThisYear(t.date)) total -= txnTotal(t); continue; }
+    if (t.type !== 'invoice' && t.type !== 'creditMemo') continue;
+    for (const p of t.payments || []) if (inThisYear(p.date) && !isCreditApplication(p, sys)) total += t.type === 'creditMemo' ? -money(p.amount) : money(p.amount);
+  }
+  return money(total);
 }
 
 // ----- Sheets
@@ -444,7 +493,7 @@ function sheetTransaction(id) {
   body += kv('Date', fmt.date(fromSec(t.date)));
   if (t.dueDate != null && tracksBalance(t)) body += kv('Due', fmt.date(fromSec(t.dueDate)), txnOverdue(t) ? 'alert-text' : '');
   body += kv('Project', p ? projectName(p) : 'Company');
-  if (who) body += kv(t.type === 'invoice' ? 'Customer' : 'Paid to', who);
+  if (who) body += kv(isSalesForm(t) ? 'Customer' : t.type === 'vendorCredit' ? 'Vendor' : 'Paid to', who);
   if (t.commitmentID && get(t.commitmentID)) body += kv('Against', commitmentTitle(get(t.commitmentID)));
   if (txnTags(t).length) body += `<div class="kv"><span>Tags</span>${tagChips(t)}</div>`;
   const lines = (t.lines || []).filter((l) => money(l.amount) || (l.memo || '').trim());
@@ -453,16 +502,27 @@ function sheetTransaction(id) {
   lineHtml += `<div class="kv"><span><b>Total</b></span><span class="total-v">${esc(fmt.money(txnTotal(t), true))}</span></div>`;
   if (txnRetainage(t)) lineHtml += kv('Retainage held', fmt.money(txnRetainage(t), true));
   if (tracksBalance(t)) { lineHtml += kv('Paid', fmt.money(txnPaid(t), true)); lineHtml += `<div class="kv"><span><b>Balance</b></span><span class="total-v">${esc(fmt.money(txnBalance(t), true))}</span></div>`; }
-  const pays = vendorPayments(t).length ? vendorPayments(t) : (t.payments || []).map((x) => ({ date: x.date, amount: money(x.amount), method: x.method, reference: x.reference, waiver: x.waiver || {} }));
-  const showWaivers = t.type === 'bill' || t.type === 'expense';
-  const payHtml = (t.type === 'bill' || t.type === 'invoice') && pays.length ? pays.map((x) => `<div class="kv"><span>${esc([fmt.date(fromSec(x.date)), METHODS[x.method] || '', (x.reference || '').trim()].filter(Boolean).join(' · '))}${showWaivers ? `<br><span class="small muted">Lien waiver: ${esc(WAIVER[x.waiver.status || 'needed'])}</span>` : ''}</span><span class="num">${esc(fmt.money(x.amount, true))}</span></div>`).join('') : '';
+  // A vendor credit or credit memo: where it went (bills or invoices it's taken off) and its refunds.
+  const appliedTo = isCredit(t) ? all('transaction').filter((x) => tracksBalance(x) && !x.isVoid)
+    .flatMap((x) => (x.payments || []).filter((p) => sameId(p.creditID, t.id)).map((p) => ({ x, p }))).sort((a, b) => (a.p.date || 0) - (b.p.date || 0)) : [];
+  if (isCredit(t)) lineHtml += `<div class="kv"><span><b>Left to use</b></span><span class="total-v">${esc(fmt.money(Math.max(0, creditLeft(t)), true))}</span></div>`;
+  const appliedHtml = appliedTo.map(({ x, p }) => `<div class="kv"><span>${esc([fmt.date(fromSec(p.date)), txnLabel(x)].join(' · '))}</span><span class="num">${esc(fmt.money(money(p.amount), true))}</span></div>`).join('');
+  const sys = booksData().sys;
+  const showWaivers = t.type === 'bill';
+  const payLabel = (x) => {
+    // A credit taken off a bill or invoice names it; a credit's own payments are its refunds.
+    if (tracksBalance(t) && isCreditApplication(x, sys)) { const credit = x.creditID ? get(x.creditID) : null; return credit ? `${fmt.date(fromSec(x.date))} · ${txnLabel(credit)} applied` : `${fmt.date(fromSec(x.date))} · ${(x.memo || '').trim() || 'Credit applied'}`; }
+    return [fmt.date(fromSec(x.date)), METHODS[x.method] || '', (x.reference || '').trim()].filter(Boolean).join(' · ');
+  };
+  const payHtml = (tracksBalance(t) || isCredit(t)) ? (t.payments || []).map((x) => `<div class="kv"><span>${esc(payLabel(x))}${showWaivers && !isCreditApplication(x, sys) ? `<br><span class="small muted">Lien waiver: ${esc(WAIVER[x.waiver?.status || 'needed'])}</span>` : ''}</span><span class="num">${esc(fmt.money(money(x.amount), true))}</span></div>`).join('') : '';
   const files = all('file').filter((f) => sameId(f.transactionID, t.id));
   openSheet(`${sheetHead(txnLabel(t), who)}
     <div class="page-bar">${pill(TXN_STATUS[st][0], TXN_STATUS[st][1])}<span class="count small">Edit it in the Mac app</span></div>
     ${isPaired(t) ? banner('Also in your personal books: Eagle Creek Books recorded this as money between you and the business.', 'var(--slate)') : ''}
     <section class="card"><div style="margin:-4px 0">${body}</div></section>
     <section class="card"><div class="card-head"><h2>${icon('coins', 'ic head-ic')}Amounts</h2></div><div style="margin-top:-6px">${lineHtml}</div></section>
-    ${payHtml ? `<section class="card"><div class="card-head"><h2>${icon('banknote', 'ic head-ic')}Payments</h2></div><div style="margin-top:-6px">${payHtml}</div></section>` : ''}
+    ${appliedHtml ? `<section class="card"><div class="card-head"><h2>${icon('doc', 'ic head-ic')}${t.type === 'vendorCredit' ? 'Taken Off Bills' : 'Taken Off Invoices'}</h2></div><div style="margin-top:-6px">${appliedHtml}</div></section>` : ''}
+    ${payHtml ? `<section class="card"><div class="card-head"><h2>${icon('banknote', 'ic head-ic')}${isCredit(t) ? 'Refunds' : 'Payments'}</h2></div><div style="margin-top:-6px">${payHtml}</div></section>` : ''}
     ${files.length ? card(`Files (${files.length})`, files.map(contactFileRow).join('')) : ''}
     ${(t.memo || '').trim() ? card('Memo', `<div style="white-space:pre-wrap">${esc(t.memo)}</div>`, { flush: false }) : ''}
     ${onMacDesktop() ? `<div class="btn-row"><a class="btn link-out" href="${esc(`eaglecreek://transaction/${String(t.id).toUpperCase()}`)}">${icon('share')}Open in Eagle Creek</a><a class="btn link-out" href="${esc(booksAppLink('transaction', t.id))}">${icon('bookClosed')}Open in Eagle Creek Books</a></div>` : ''}`);
