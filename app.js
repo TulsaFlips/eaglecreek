@@ -6,7 +6,7 @@
  */
 'use strict';
 
-const APP_VERSION = '1.14.2';
+const APP_VERSION = '1.15.0';
 // The record kinds kept on this device. QuickBooks, bank imports and the rest stay on the Mac.
 // planSheet and planMark are the plan reader's scales and measurements (plans.js); the Mac app
 // leaves kinds it doesn't know alone.
@@ -2522,7 +2522,12 @@ async function openFile(id, listName = '') {
 function stepViewer(n) {
   const st = viewerState;
   if (!st || st.index < 0) return;
-  const next = st.list[st.index + n];
+  // The list as it is now: the photo showing may have been moved to another folder meanwhile,
+  // in which case its neighbours are where it was.
+  const list = viewerList(st.listName);
+  const here = list.indexOf(st.id);
+  const target = here >= 0 ? here + n : (n > 0 ? st.index : st.index - 1);
+  const next = target >= 0 ? list[target] : undefined;
   if (next) openFile(next, st.listName);
 }
 
