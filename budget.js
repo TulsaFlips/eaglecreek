@@ -1,7 +1,8 @@
 /* Eagle Creek — a project's Budget section: Budget, Selections, Subs & POs.
  *
  * Budget: every line by category with what's been billed against it in the books, the
- * contingency, and what's left (the Mac's BudgetTab and BudgetMath). The budget itself is
+ * contingency, and what's left (the Mac's BudgetTab and BudgetMath). A flip whose deal still runs
+ * on its quick rehab estimate says so, and its totals are the estimate's. The budget itself is
  * edited on the Mac.
  * Selections: the finish schedule (the Mac's SelectionsTab and SelectionMath): what's going in,
  * from whom, where each stands and when to order it. Selections can be added and changed here;
@@ -60,7 +61,7 @@ function projectBudget(p) {
   const items = p.budget || [];
   const t = budgetTotals(p);
   const work = p.kind === 'flip' ? 'Rehab' : 'Construction';
-  if (!items.length && t.estimate <= 0) {
+  if (!items.length && t.estimate <= 0 && !t.quick) {
     return emptyState('hammer', 'No Budget Yet', p.kind === 'clientJob'
       ? "The budget is filled from the estimate (at your cost) on the Mac. Once it's set up, it shows here with what's been billed against each line."
       : "Set up the budget on the Mac (the standard scope, or your own categories). It shows here with what's been billed against each line.");
@@ -69,9 +70,11 @@ function projectBudget(p) {
   const spent = budgetSpent(p, jc.billedByItem, jc.rehabBilled);
   const left = money(t.total - spent);
   const used = t.total > 0 ? jc.rehabBilled / t.total : 0;
-  let html = `<div class="tiles">
-    ${tile(`${work} Budget`, fmt.money(t.total), t.contingency > 0 ? `Includes ${fmt.money(t.contingency)} contingency` : plural(items.length, 'line'))}
-    ${tile('Billed', fmt.money(jc.rehabBilled), t.total > 0 ? `${Math.round(used * 100)}% of budget` : '', { accent: 'var(--forest)', progress: Math.min(1, used) })}
+  // While the deal runs on the quick estimate, the totals are the estimate's (as on the Mac).
+  let html = t.quick ? banner(`The deal uses the quick rehab estimate of ${fmt.money(t.base)} (before contingency). The budget lines so far total ${fmt.money(t.lines)}. Switch to the lines on the Mac: Budget › Use Budget Lines.`, 'var(--slate)') : '';
+  html += `<div class="tiles">
+    ${tile(t.quick ? `${work} Estimate` : `${work} Budget`, fmt.money(t.total), t.contingency > 0 ? `Includes ${fmt.money(t.contingency)} contingency` : t.quick ? 'Quick estimate' : plural(items.length, 'line'))}
+    ${tile('Billed', fmt.money(jc.rehabBilled), t.total > 0 ? `${Math.round(used * 100)}% of ${t.quick ? 'the estimate' : 'budget'}` : '', { accent: 'var(--forest)', progress: Math.min(1, used) })}
     ${tile('Budget Left', fmt.money(left), left < 0 ? 'Over budget' : 'Total less spent', { accent: left < 0 ? 'var(--danger)' : 'var(--olive)' })}
   </div>`;
   const overLines = items.filter((b) => { const total = budgetItemTotal(b); return total > 0 && (jc.billedByItem.get(key(b.id)) || 0) > total + 0.5; });
@@ -88,7 +91,8 @@ function projectBudget(p) {
   const actual = items.reduce((s, b) => s + (Number(b.actualCost) || 0), 0);
   let totals = '';
   if (t.estimate > 0) totals += kvRow('Estimated from cost per sq ft', fmt.money(t.estimate));
-  totals += kvRow('Line items', fmt.money(t.base));
+  if (t.quick) totals += kvRow('Line items so far (not used yet)', fmt.money(t.lines)) + kvRow('Quick estimate', fmt.money(t.base));
+  else totals += kvRow('Line items', fmt.money(t.base));
   totals += kvRow(`Contingency (${trimNum(p.contingencyPct ?? 10)}%)`, fmt.money(t.contingency));
   totals += `<div class="kv"><span><b>Total</b></span><span class="total-v">${esc(fmt.money(t.total))}</span></div>`;
   if (area > 0) totals += kvRow('Per sq ft', fmt.money(t.total / area, true));

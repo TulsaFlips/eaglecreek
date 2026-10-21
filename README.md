@@ -18,6 +18,8 @@ sync (every few minutes, or **Sync Now**), and the other way round.
   the books, % done and the typed actual, with the contingency, total, per square foot, billed to
   date and budget left worked out exactly as the Mac does. Lines billed over budget are flagged.
   Tap a line for what's been paid and the bills behind it. The budget itself is changed on the Mac.
+  A flip still on a quick rehab estimate (set on the Mac's Purchase & Sale page) shows the
+  estimate as its budget, with the lines so far underneath; its draws and job cost say so too.
 - **Selections:** the finish schedule: every finish and fixture by category, with product, color,
   quantity, cost, supplier and status (TBD, GC Choice, Locked, Ordered, Installed, N/A). Order-by
   dates come from the schedule (the task it's needed for less the lead time) or a firm date, and

@@ -501,7 +501,9 @@ function jobCostReport(p) {
         <div class="end"><span class="amt" style="${over ? 'color:var(--danger)' : ''}">${esc(signedMoney(money(total - billed), false))}</span><span>${over ? 'over' : 'left'}</span></div></button>`;
     }).join(''));
   }
-  html += kvCard('Totals', kvLine('Budget lines', fmt.money(t.base)) + kvLine('Contingency', fmt.money(t.contingency)) + kvTotal('Budget', fmt.money(t.total))
+  // On a quick rehab estimate the total is the estimate's; the lines are as they stand so far.
+  const budgetLines = t.quick ? kvLine('Budget lines so far (not used yet)', fmt.money(t.lines)) + kvLine('Quick estimate', fmt.money(t.base)) : kvLine('Budget lines', fmt.money(t.base));
+  html += kvCard('Totals', budgetLines + kvLine('Contingency', fmt.money(t.contingency)) + kvTotal(t.quick ? 'Budget (estimate)' : 'Budget', fmt.money(t.total))
     + kvLine('Billed on lines', fmt.money(jc.billedOnLines)) + (jc.unlinkedRehab ? kvLine('Billed, not on a line', fmt.money(jc.unlinkedRehab)) : '') + kvTotal('Left in the budget', fmt.money(money(t.total - jc.rehabBilled)), profitTint(t.total - jc.rehabBilled)));
   return html;
 }
@@ -576,6 +578,7 @@ function projectDraws(p) {
     ${tile('Draw Cash Not Yet Spent', fmt.money(m.drawCashPosition), m.drawCashPosition < 0 ? "You've paid ahead of the draws" : `After ${fmt.money(m.drawFees)} in lender fees`, { accent: 'var(--forest)', tint: profitTint(m.drawCashPosition) })}
   </div>`;
   if (m.hasUnrecordedFunding) html += banner('A draw is marked funded but isn’t in the books yet. Record Draw Received on the Mac so the loan balance stays right.');
+  if (deal.usesRehabEstimate && deal.draws.length) html += banner('The deal uses the quick rehab estimate, so the draws have no amounts yet. Each draw is sized from its budget lines once they’re used (on the Mac: Budget › Use Budget Lines).', 'var(--slate)');
   if (!deal.draws.length) return html + emptyState('banknote', 'No Draw Schedule', 'Set up the draws on the Mac (Money › Draws › Load Standard Draw Plan). Each one shows here with what’s been funded and billed.');
   deal.draws.forEach((line, i) => {
     const r = m.drawLines[i];
