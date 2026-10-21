@@ -55,7 +55,10 @@ sync (every few minutes, or **Sync Now**), and the other way round.
   invoices and deposits are still entered on the Mac.
 - **Photos:** take or pick photos straight into a project's Progress Photos, or into a daily log.
   They're resized on the phone (2400 px) so they upload fast from the site. Swipe between
-  photos; delete one taken by mistake.
+  photos; delete one taken by mistake. The project's photo folders (Demo, Framing…) are along
+  the top with how many photos each holds: pick one to see its photos, and photos you take or
+  pick then go into it. **New Folder** adds one, and the folder button in the photo viewer moves
+  a photo to another folder. Folders are renamed and deleted on the Mac.
 - **Daily Logs:** today's log in one tap, with the last log's crews carried over. Same sections
   as the Mac (Weather, Crews on Site, Work Performed, Deliveries and Inspections, Problems,
   Delays and Safety, Notes), weather filled in for the project's city, photos attached. Saves
@@ -331,7 +334,7 @@ or its browser storage copied off it, gives up nothing readable.
 
 - Edits follow the Mac's rule: the newest edit wins. If the same punch item is changed on the
   phone and the Mac between syncs, the later change is kept (and the app says when the Mac's won).
-- Selections and draws are saved inside the project, lien waivers on the bill, change orders and
+- Selections, draws and photo folders are saved inside the project, lien waivers on the bill, change orders and
   trips on their own, all of which the Mac also edits. Each change made here is kept as a step until it reaches Supabase; if the
   record changed on the Mac in the meantime (even while the phone had no signal), the step is
   made again on the Mac's newer copy, so neither edit is lost. The one case to avoid: changing
