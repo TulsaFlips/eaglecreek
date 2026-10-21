@@ -968,7 +968,7 @@ function photoName(date) {
 }
 
 /** Adds files as the Mac's VaultDocuments: saved here at once, uploaded on the next sync. */
-async function addFiles(fileList, { projectID = null, category = 'progressPhoto', recordID = null, needsReview = false, contactID = null, transactionID = null, drawID = null, ids = null } = {}) {
+async function addFiles(fileList, { projectID = null, category = 'progressPhoto', recordID = null, needsReview = false, contactID = null, transactionID = null, drawID = null, folderID = null, ids = null } = {}) {
   const files = [...fileList];
   if (!files.length) return 0;
   if (!canEdit('files')) { refuseViewOnly('file'); return 0; }
@@ -1000,6 +1000,7 @@ async function addFiles(fileList, { projectID = null, category = 'progressPhoto'
     if (contactID) doc.contactID = contactID;
     if (transactionID) doc.transactionID = transactionID;
     if (drawID) doc.drawID = drawID;
+    if (folderID && PHOTO_CATEGORIES.has(category)) doc.folderID = folderID;
     if (ids) ids.push(doc.id);
     const id = key(doc.id);
     await idb.set('blobs', id, { blob, contentType: contentType(ext) });
@@ -1826,14 +1827,100 @@ function photoGrid(files, listName) {
 
 const projectPhotoList = (projectID) => filesFor('projectID', projectID).filter((f) => PHOTO_CATEGORIES.has(f.category)).sort((a, b) => (b.documentDate || b.addedAt || 0) - (a.documentDate || a.addedAt || 0));
 
+// ----- Photo folders: the Mac's Project.photoFolders, in its order. Each photo's folderID says
+// which one it's in; one pointing at a folder the project doesn't have isn't in a folder.
+
+const photoFolders = (p) => (Array.isArray(p?.photoFolders) ? p.photoFolders.filter((x) => x && x.id) : []);
+function photoFolderOf(f, folders) {
+  if (!f?.folderID || !PHOTO_CATEGORIES.has(f.category)) return null;
+  return folders.find((x) => sameId(x.id, f.folderID)) || null;
+}
+/** The photos a pick shows: 'all', 'none' (not in a folder) or a folder's id (lowercase). */
+function photosInPick(files, pick, folders) {
+  if (!pick || pick === 'all') return files;
+  if (pick === 'none') return files.filter((f) => !photoFolderOf(f, folders));
+  return files.filter((f) => key(photoFolderOf(f, folders)?.id) === pick);
+}
+/** The folder picked on a project's Photos page; All Photos when it's gone. */
+function photoFolderPick(p, photos) {
+  const pick = (S.ui.photoFolder || {})[key(p.id)] || 'all';
+  const folders = photoFolders(p);
+  if (pick === 'none') return photos.some((f) => photoFolderOf(f, folders)) ? 'none' : 'all';
+  return pick === 'all' || folders.some((x) => key(x.id) === pick) ? pick : 'all';
+}
+const cleanFolderName = (s) => String(s || '').split(/\s+/).filter(Boolean).join(' ');
+
+// A folder added on the phone goes into the project as a step, so a change made on the Mac at
+// the same time isn't lost (see editRecord).
+Object.assign(RECORD_OPS, {
+  addPhotoFolder(p, { id, name }) {
+    const list = Array.isArray(p.photoFolders) ? p.photoFolders : [];
+    if (!list.some((x) => sameId(x.id, id))) list.push({ id, name });
+    p.photoFolders = list;
+  },
+});
+
 function projectPhotos(p) {
   const pid = esc(key(p.id));
-  const files = projectPhotoList(p.id);
-  let html = `<div class="btn-row" style="margin-bottom:12px">
-    <button class="btn primary" data-act="photo" data-project="${pid}" data-capture="1">${icon('camera')}Camera</button>
-    <button class="btn" data-act="photo" data-project="${pid}">${icon('image')}Library</button></div>`;
-  html += files.length ? photoGrid(files, `photos:${key(p.id)}`) : emptyState('image', 'No Photos Yet', "Photos taken here go into this project's Progress Photos on the Mac.");
+  const photos = projectPhotoList(p.id);
+  const folders = photoFolders(p);
+  const pick = photoFolderPick(p, photos);
+  const picked = folders.find((x) => key(x.id) === pick) || null;
+  const files = photosInPick(photos, pick, folders);
+  const chip = (value, label, n) => `<button type="button" data-act="photo-folder" data-project="${pid}" data-folder="${esc(value)}" class="${pick === value ? 'on' : ''}" aria-pressed="${pick === value}">${label}<span class="ct">${n}</span></button>`;
+  let chips = chip('all', 'All Photos', photos.length);
+  const loose = photos.filter((f) => !photoFolderOf(f, folders)).length;
+  if (loose < photos.length) chips += chip('none', 'Not in a Folder', loose);
+  for (const x of folders) chips += chip(key(x.id), `${icon('folder', 'ic chip-ic')}${esc(x.name)}`, photosInPick(photos, key(x.id), folders).length);
+  chips += `<button type="button" data-act="photo-folder-new" data-project="${pid}">${icon('plus', 'ic chip-ic')}New Folder</button>`;
+  const into = picked ? ` data-folder="${esc(key(picked.id))}"` : '';
+  let html = `<div class="chips photo-folders">${chips}</div>
+    <div class="btn-row" style="margin-bottom:12px">
+    <button class="btn primary" data-act="photo" data-project="${pid}"${into} data-capture="1">${icon('camera')}Camera</button>
+    <button class="btn" data-act="photo" data-project="${pid}"${into}>${icon('image')}Library</button></div>`;
+  if (files.length) html += photoGrid(files, `photos:${key(p.id)}:${pick}`);
+  else if (picked) html += emptyState('folder', `No Photos in ${picked.name} Yet`, `Photos you take or pick while ${picked.name} is selected go into it, here and on the Mac.`);
+  else html += emptyState('image', 'No Photos Yet', "Photos taken here go into this project's Progress Photos on the Mac.");
   return html;
+}
+
+function sheetNewPhotoFolder(projectID) {
+  const p = project(projectID);
+  if (!p) return;
+  openSheet(`
+    ${sheetHead('New Folder', projectName(p))}
+    <div class="form-section"><div class="form-card"><label class="field"><span>Name</span><input id="folder-name" maxlength="80" autocomplete="off" placeholder="Demo, Framing, Final…"></label></div>
+    <div class="fs-foot">Photos you take or pick while a folder is selected go into it, here and on the Mac.</div></div>
+    <div class="sheet-actions"><button class="btn" data-act="sheet-close">Cancel</button><button class="btn primary" data-act="photo-folder-create" data-project="${esc(key(p.id))}">Create</button></div>
+  `, (sheet) => {
+    const input = $('#folder-name', sheet);
+    input.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') { e.preventDefault(); $('[data-act="photo-folder-create"]', sheet).click(); }
+    });
+    input.focus();
+  });
+}
+
+/** Moves a photo into one of its project's folders ('' for none). Every other field is kept. */
+async function movePhotoToFolder(fileID, folderKey) {
+  const f = get(fileID);
+  if (!f) return;
+  const folders = photoFolders(project(f.projectID));
+  const folder = folderKey ? folders.find((x) => key(x.id) === folderKey) : null;
+  if (folderKey && !folder) return;
+  if (folder ? sameId(f.folderID, folder.id) : !f.folderID) return;
+  const c = clone(f);
+  if (folder) c.folderID = folder.id; else delete c.folderID;
+  try {
+    // A photo still waiting to upload goes up with its new folder once it has.
+    await saveRecord('file', c, { upload: !isPending(f) });
+  } catch (err) {
+    if (!(err instanceof ViewOnlyError)) toast(friendlyError(err));
+    return;
+  }
+  const label = $('#viewer-folder');
+  if (label) label.textContent = folder ? folder.name : 'Not in a Folder';
+  toast(folder ? `Moved to ${folder.name}` : 'Taken out of its folder');
 }
 
 function fileRow(f) {
@@ -2355,8 +2442,8 @@ function loadPdfJs() {
 
 function viewerList(name) {
   if (!name) return [];
-  const [kind, id] = name.split(':');
-  if (kind === 'photos') return projectPhotoList(id).map((f) => key(f.id));
+  const [kind, id, pick] = name.split(':');
+  if (kind === 'photos') return photosInPick(projectPhotoList(id), pick, photoFolders(project(id))).map((f) => key(f.id));
   if (kind === 'log') return filesFor('recordID', id).sort((a, b) => (a.addedAt || 0) - (b.addedAt || 0)).map((f) => key(f.id));
   if (kind === 'draw') return all('file').filter((f) => sameId(f.drawID, id)).sort((a, b) => (b.addedAt || 0) - (a.addedAt || 0)).map((f) => key(f.id));
   return [];
@@ -2372,12 +2459,17 @@ async function openFile(id, listName = '') {
   const list = viewerList(listName);
   const index = list.indexOf(key(f.id));
   const root = $('#sheet-root');
+  // A project's photo can move to another of its folders from here.
+  const folders = PHOTO_CATEGORIES.has(f.category) ? photoFolders(project(f.projectID)) : [];
+  const inFolder = photoFolderOf(f, folders);
+  const folderPicker = folders.length ? `<div class="btns"><label class="btn sm folder-pick">${icon('folder')}<span id="viewer-folder">${esc(inFolder ? inFolder.name : 'Not in a Folder')}</span>
+      <select data-folder-move="${esc(key(f.id))}" aria-label="Move to folder"${canEditRecord('file', f) ? '' : ' disabled'}><option value="">Not in a Folder</option>${folders.map((x) => `<option value="${esc(key(x.id))}"${inFolder && sameId(inFolder.id, x.id) ? ' selected' : ''}>${esc(x.name)}</option>`).join('')}</select></label></div>` : '';
   root.innerHTML = `<div class="viewer" role="dialog" aria-modal="true" aria-label="${esc(fileTitle(f))}">
     <div class="viewer-bar"><button class="icon-btn" data-act="sheet-close" aria-label="Close">${icon('close')}</button><div class="t">${esc(fileTitle(f))}</div><div id="viewer-tools" class="zoom"></div></div>
     <div class="viewer-body" id="viewer-body"><div class="viewer-msg">Loading…</div>
       ${index > 0 ? `<button class="viewer-nav prev" data-act="viewer-step" data-n="-1" aria-label="Previous photo">${icon('left')}</button>` : ''}
       ${index >= 0 && index < list.length - 1 ? `<button class="viewer-nav next" data-act="viewer-step" data-n="1" aria-label="Next photo">${icon('right')}</button>` : ''}</div>
-    <div class="viewer-foot"><div>${esc([CATEGORY_ONE[f.category] || '', fmt.date(fileDate(f)), f.fileSize ? fmt.size(f.fileSize) : '', index >= 0 && list.length > 1 ? `${index + 1} of ${list.length}` : ''].filter(Boolean).join(' · '))}</div><div class="btns" id="viewer-btns"></div></div></div>`;
+    <div class="viewer-foot"><div>${esc([CATEGORY_ONE[f.category] || '', fmt.date(fileDate(f)), f.fileSize ? fmt.size(f.fileSize) : '', index >= 0 && list.length > 1 ? `${index + 1} of ${list.length}` : ''].filter(Boolean).join(' · '))}</div>${folderPicker}<div class="btns" id="viewer-btns"></div></div></div>`;
   document.body.style.overflow = 'hidden';
   const state = { id: key(f.id), list, listName, index, urls: [], cleanup: null };
   viewerState = state;
@@ -2470,9 +2562,30 @@ const ACTIONS = {
   photo: (el) => {
     const p = project(el.dataset.project);
     const rec = el.dataset.record ? get(el.dataset.record) : null;
+    // Into the folder picked on the Photos page.
+    const folder = p && el.dataset.folder ? photoFolders(p).find((x) => key(x.id) === el.dataset.folder) : null;
     flushLogSave();
     pickFiles({ accept: 'image/*', capture: !!el.dataset.capture, multiple: !el.dataset.capture },
-      (files) => addFiles(files, { projectID: p ? p.id : null, category: 'progressPhoto', recordID: rec ? rec.id : null }));
+      (files) => addFiles(files, { projectID: p ? p.id : null, category: 'progressPhoto', recordID: rec ? rec.id : null, folderID: folder ? folder.id : null }));
+  },
+  'photo-folder': (el) => {
+    S.ui.photoFolder = { ...(S.ui.photoFolder || {}), [el.dataset.project]: el.dataset.folder };
+    render();
+  },
+  'photo-folder-new': (el) => sheetNewPhotoFolder(el.dataset.project),
+  'photo-folder-create': async (el) => {
+    const p = project(el.dataset.project);
+    if (!p) { closeSheet(); return; }
+    const name = cleanFolderName($('#folder-name')?.value);
+    if (!name) { toast('Type a name for the folder.'); return; }
+    if (photoFolders(p).some((x) => String(x.name || '').toLowerCase() === name.toLowerCase())) { toast(`There's already a folder named “${name}”.`); return; }
+    const id = newId();
+    closeSheet();
+    if (await editProject(p.id, [{ op: 'addPhotoFolder', id, name }])) {
+      S.ui.photoFolder = { ...(S.ui.photoFolder || {}), [key(p.id)]: key(id) };
+      toast(`Added ${name}`);
+      render();
+    }
   },
   'add-file': (el) => sheetAddFile(el.dataset.project),
   'upload-go': (el) => {
@@ -2993,6 +3106,10 @@ document.addEventListener('input', (e) => {
   if (form) queueLogSave(form);
 });
 document.addEventListener('change', (e) => {
+  if (e.target.matches?.('[data-folder-move]')) {
+    movePhotoToFolder(e.target.dataset.folderMove, e.target.value);
+    return;
+  }
   if (e.target.closest('.sheet')) sheetDirty = true;
   const form = e.target.closest('#log-form');
   if (form) queueLogSave(form, true);

@@ -495,6 +495,12 @@ a.kv { color: inherit; }
 .seg .seg-ic { width: 16px; height: 16px; opacity: .72; }
 .seg .on .seg-ic { opacity: 1; }
 .chips .chip-ic { width: 15px; height: 15px; vertical-align: -3px; margin-right: 5px; }
+/* Photo folders: how many photos each holds, and the viewer's "move to folder" picker. */
+.chips .ct { margin-left: 6px; opacity: .6; font-variant-numeric: tabular-nums; }
+.chips button.on .ct { opacity: .85; }
+.folder-pick { position: relative; overflow: hidden; max-width: 100%; }
+.folder-pick span { overflow: hidden; text-overflow: ellipsis; }
+.folder-pick select { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; cursor: pointer; font-size: 16px; }
 .fs-title { display: inline-flex; align-items: center; gap: 6px; }
 .fs-head .fs-ic { width: 16px; height: 16px; color: var(--gold); }
 
