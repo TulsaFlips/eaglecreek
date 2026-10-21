@@ -141,6 +141,12 @@ records in your Supabase project.
 - **W-9 details** (tax classification, the last four of the taxpayer ID, the 1099 mailing
   address) show on the vendor's contact page. They're entered in Eagle Creek Books. Editing a
   contact here keeps them.
+- **Vendor credits, credit memos and refunds** (Eagle Creek v1.4.2) show in Books ›
+  Transactions (filter **Credits & refunds**) with what's left of each credit, where it went and
+  its refunds. They're made and applied on the Mac; here they're view-only, and a bill or invoice
+  shows the credits taken off it. Unused credits count against what's owed on the aging reports
+  and the contact's page, a vendor credit comes off its budget line's costs, and a credit taken
+  off a bill isn't counted as paid on the 1099 report or for lien waivers.
 - **The change history** in Eagle Creek Books shows changes made here as **Web app**.
 - **On a Mac,** in Chrome or Safari, an entry's sheet has **Open in Eagle Creek** and **Open in
   Eagle Creek Books**, and Books › Overview links to Eagle Creek Books' Banking and 1099s.

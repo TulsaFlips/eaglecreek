@@ -222,12 +222,42 @@ function ledgerPostings(t, sys, payee) {
       add(sys.uncategorizedAsset, -imbalance, { memo: 'Out of balance' });
       break;
     }
+    // Credits and refunds (Mac v1.4.2). A vendor credit takes its lines off costs and what you
+    // owe the vendor; its payments are money the vendor paid back. A credit memo takes its lines
+    // off income and what the customer owes; its payments are money paid back to them. A refund
+    // pays a customer back straight away.
+    case 'vendorCredit':
+      add(sys.accountsPayable, txnTotal(t));
+      for (const l of lines) add(l.accountID || sys.uncategorizedExpense, -(Number(l.amount) || 0), { memo: l.memo, budgetItemID: l.budgetItemID });
+      for (const p of pays) {
+        add(p.accountID || sys.defaultBank, p.amount, { date: p.date, memo: p.memo, paymentID: p.id, number: p.reference || '', cleared: p.isCleared });
+        add(sys.accountsPayable, -(Number(p.amount) || 0), { date: p.date, memo: p.memo, paymentID: p.id, number: p.reference || '' });
+      }
+      break;
+    case 'creditMemo':
+      for (const l of lines) add(l.accountID || sys.uncategorizedIncome, l.amount, { memo: l.memo, budgetItemID: l.budgetItemID });
+      add(sys.salesTaxPayable, txnTax(t), { memo: 'Sales tax' });
+      add(sys.accountsReceivable, -txnTotal(t));
+      for (const p of pays) {
+        add(sys.accountsReceivable, p.amount, { date: p.date, memo: p.memo, paymentID: p.id, number: p.reference || '' });
+        add(p.accountID || sys.defaultBank, -(Number(p.amount) || 0), { date: p.date, memo: p.memo, paymentID: p.id, number: p.reference || '', cleared: p.isCleared });
+      }
+      break;
+    case 'refund':
+      for (const l of lines) add(l.accountID || sys.uncategorizedIncome, l.amount, { memo: l.memo, budgetItemID: l.budgetItemID });
+      add(sys.salesTaxPayable, txnTax(t), { memo: 'Sales tax' });
+      add(t.accountID || sys.defaultBank, -txnTotal(t), { cleared: t.isCleared });
+      break;
     default: break;
   }
   return out;
 }
 
 const JAN_1_2000 = 946_684_800;
+
+/** A payment on a bill or invoice that applies a credit rather than moving money: it names the
+ * credit, or comes from Accounts Payable (Receivable), as QuickBooks' credits did (Credits.isApplication). */
+const isCreditApplication = (p, sys) => !!p.creditID || sameId(p.accountID, sys.accountsPayable) || sameId(p.accountID, sys.accountsReceivable);
 
 /** Everything the money screens need, worked out once per change (the Mac's BooksData). */
 function booksData() {
@@ -401,6 +431,18 @@ function agingReport(kind, asOf = new Date(), filter = 'all') {
     const name = d.payeeName(t);
     items.push({ id: t.id, contactID: t.contactID || null, name: name || 'No name', number: t.number || '', date: t.date, dueDate: due, daysPastDue: days, balance, projectID: t.projectID || null });
   }
+  // Credits not used yet (by that day) count against what's owed, so the total is the Accounts
+  // Payable (Receivable) balance, as in QuickBooks. They age from their date.
+  const creditType = kind === 'payables' ? 'vendorCredit' : 'creditMemo';
+  const applied = creditApplied(cutoff);
+  for (const t of d.transactions) {
+    if (t.type !== creditType || t.isVoid || !inRange(cutoff, t.date || 0) || !matchesFilter(filter, t.projectID)) continue;
+    const refunded = (t.payments || []).filter((p) => inRange(cutoff, p.date || 0)).reduce((s, p) => s + (Number(p.amount) || 0), 0);
+    const left = money(txnTotal(t) - refunded - (applied.get(key(t.id)) || 0));
+    if (left <= 0.005) continue;
+    const name = d.payeeName(t);
+    items.push({ id: t.id, contactID: t.contactID || null, name: name || 'No name', number: t.number || '', date: t.date, dueDate: t.date || 0, daysPastDue: dayDiff(fromSec(t.date || 0), today), balance: -left, projectID: t.projectID || null, isCredit: true });
+  }
   items.sort((a, b) => a.dueDate - b.dueDate);
   const grouped = new Map();
   for (const i of items) {
@@ -430,8 +472,9 @@ function lienWaiverReport(filter = 'all') {
   for (const t of d.transactions) {
     if (!(t.type === 'bill' || t.type === 'expense') || !matchesFilter(filter, t.projectID)) continue;
     const contact = t.contactID ? get(t.contactID) : null;
+    // (A credit taken off a bill isn't a payment to waive.)
     const pays = t.isVoid ? [] : t.type === 'bill'
-      ? (t.payments || []).map((p) => ({ id: p.id, date: p.date, amount: Number(p.amount) || 0, method: p.method || 'check', reference: p.reference || '', waiver: p.waiver || {} }))
+      ? (t.payments || []).filter((p) => !isCreditApplication(p, d.sys)).map((p) => ({ id: p.id, date: p.date, amount: Number(p.amount) || 0, method: p.method || 'check', reference: p.reference || '', waiver: p.waiver || {} }))
       : [{ id: null, date: t.date, amount: txnTotal(t), method: t.method || 'check', reference: t.number || '', waiver: t.waiver || {} }];
     for (const p of pays) {
       if (Math.abs(p.amount) < 0.005) continue;
@@ -471,8 +514,9 @@ function vendorPaymentsReport(range, filter = 'all') {
   const grouped = new Map();
   for (const t of d.transactions) {
     if (!(t.type === 'bill' || t.type === 'expense') || !matchesFilter(filter, t.projectID)) continue;
+    // (A credit taken off a bill moves no money, so it isn't a payment for the 1099.)
     const pays = t.isVoid ? [] : t.type === 'bill'
-      ? (t.payments || []).map((x) => ({ date: x.date, amount: money(x.amount), method: x.method, accountID: x.accountID }))
+      ? (t.payments || []).filter((x) => !isCreditApplication(x, d.sys)).map((x) => ({ date: x.date, amount: money(x.amount), method: x.method, accountID: x.accountID }))
       : [{ date: t.date, amount: txnTotal(t), method: t.method, accountID: t.accountID }];
     for (const p of pays) {
       if (!inRange(range, p.date || 0) || Math.abs(p.amount) < 0.005) continue;
@@ -515,10 +559,16 @@ function cashByMonth(months = 12, filter = 'all', now = new Date()) {
 
 // ----- Job cost (Engine/ProjectFinancials.swift)
 
-/** Share of a bill that's been paid; expenses and posted crew labor count as paid. */
+/** Share of a bill that's been paid; expenses and posted crew labor count as paid. A vendor
+ * credit counts in the share of it that's been used: taken off a bill or refunded. */
 function paidRatio(t) {
   if (t.type === 'expense' || t.type === 'journal') return 1;
   if (t.type === 'bill') { const total = txnTotal(t); return total > 0.005 ? Math.min(1, Math.max(0, txnPaid(t) / total)) : 0; }
+  if (t.type === 'vendorCredit') {
+    // (Its lines are negative in projectCosts, so its total is too.)
+    const whole = Math.abs(txnTotal(t));
+    return whole > 0.005 ? Math.min(1, Math.max(0, (txnPaid(t) + (creditApplied().get(key(t.id)) || 0)) / whole)) : 0;
+  }
   return 0;
 }
 // ----- Work in Progress (Engine/WorkInProgress.swift)
@@ -533,13 +583,15 @@ function isWIPEntry(t) {
   return t.lines.some((l) => sameId(l.id, marker));
 }
 
-/** Bills, expenses and crew-labor journal lines on a project. */
+/** Bills, expenses, vendor credits (their lines count against the costs) and crew-labor journal
+ * lines on a project. */
 function projectCosts(projectID) {
   const d = booksData();
   const out = [];
   for (const t of d.transactions) {
     if (!sameId(t.projectID, projectID) || t.isVoid || isWIPEntry(t)) continue;
     if (t.type === 'bill' || t.type === 'expense') { out.push(t); continue; }
+    if (t.type === 'vendorCredit') { out.push({ ...t, lines: (t.lines || []).map((l) => ({ ...l, amount: -(Number(l.amount) || 0) })) }); continue; }
     if (t.type !== 'journal') continue;
     const lines = (t.lines || []).filter((l) => d.account(l.accountID)?.type === 'jobCost');
     if (lines.length) out.push({ ...t, lines });
@@ -874,7 +926,8 @@ function clientFinancials(p) {
   let received = 0, open = 0;
   for (const t of d.transactions) {
     if (!sameId(t.projectID, p.id) || t.type !== 'invoice' || t.isVoid) continue;
-    received += (t.payments || []).reduce((s, x) => s + (Number(x.amount) || 0), 0);
+    // (A credit taken off an invoice isn't money received.)
+    received += (t.payments || []).filter((x) => !isCreditApplication(x, d.sys)).reduce((s, x) => s + (Number(x.amount) || 0), 0);
     open += txnBalance(t);
   }
   f.received = money(received); f.openInvoices = money(open);
