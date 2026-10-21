@@ -576,14 +576,16 @@ function jobCost(p) {
 }
 
 const budgetItemTotal = (b) => (b.quantity ?? 1) * (Number(b.unitCost) || 0);
-/** The budget's totals (DealAnalysis: rehabBase, contingency, rehabTotal). */
+/** The budget's totals (DealAnalysis: rehabBase, contingency, rehabTotal). A flip on its quick
+ *  rehab estimate (Project.rehabEstimateInUse) uses that one number instead of the lines. */
 function budgetTotals(p) {
   const sum = (p.budget || []).reduce((s, b) => s + budgetItemTotal(b), 0);
   const units = p.units || [];
   const estimate = p.kind === 'newBuild' && sum <= 0 ? units.reduce((s, u) => s + (Number(u.sqft) || 0), 0) * Math.max(0, Number(p.development?.buildCostPerSqft) || 0) : 0;
-  const base = sum + estimate;
+  const quick = p.kind === 'flip' && !!p.usesRehabEstimate;
+  const base = quick ? Math.max(0, Number(p.rehabEstimate) || 0) : sum + estimate;
   const contingency = base * (p.contingencyPct ?? 10) / 100;
-  return { lines: sum, estimate, base, contingency, total: base + contingency };
+  return { lines: sum, estimate, quick, base, contingency, total: base + contingency };
 }
 /** Square feet of finished living space (Project.livingArea). */
 function livingArea(p) {
@@ -685,20 +687,21 @@ function dealNumbers(p) {
   const buildMonths = Math.max(0, holding.rehabMonths);
   const holdMonths = Math.max(0, preMonths + holding.rehabMonths + holding.saleMonths);
   // Draw schedule: each draw's budget lines and its share of the contingency and holdback.
+  // A quick rehab estimate isn't split into draws until the budget lines are used.
   const draws = p.draws || [];
   const drawIDs = new Set(draws.map((x) => key(x.id)));
   const byDraw = new Map();
   const unassigned = [];
-  for (const b of p.budget || []) {
+  for (const b of t.quick ? [] : p.budget || []) {
     if (b.drawID && drawIDs.has(key(b.drawID))) { const k = key(b.drawID); if (!byDraw.has(k)) byDraw.set(k, []); byDraw.get(k).push(b); } else unassigned.push(b);
   }
-  const unassignedSum = unassigned.reduce((s, b) => s + budgetItemTotal(b), 0) + t.estimate;
+  const unassignedSum = unassigned.reduce((s, b) => s + budgetItemTotal(b), 0) + t.estimate + (t.quick ? t.base : 0);
   const sums = draws.map((x) => (byDraw.get(key(x.id)) || []).reduce((s, b) => s + budgetItemTotal(b), 0));
   const allSum = sums.reduce((a, b) => a + b, 0) + unassignedSum;
   const drawCont = draws.map(() => 0);
   let unassignedCont = 0;
   if (t.contingency > 0) {
-    if (!draws.length) unassignedCont = t.contingency;
+    if (!draws.length || t.quick) unassignedCont = t.contingency;
     else if (p.contingencyAllocation === 'finalDraw' || allSum <= 0) drawCont[drawCont.length - 1] = t.contingency;
     else { sums.forEach((s, i) => { drawCont[i] = t.contingency * s / allSum; }); unassignedCont = t.contingency * unassignedSum / allSum; }
   }
@@ -734,7 +737,9 @@ function dealNumbers(p) {
   }
   d.points = d.loanAmount * loan.pointsPct / 100;
   d.lenderFees = Number(loan.lenderFees) || 0;
-  d.drawFees = (Number(loan.drawFee) || 0) * d.draws.filter((x) => x.total > 0).length;
+  // On a quick estimate every scheduled draw is counted (DealAnalysis.drawFeeCount).
+  d.drawFees = (Number(loan.drawFee) || 0) * (t.quick ? (t.base > 0 ? d.draws.length : 0) : d.draws.filter((x) => x.total > 0).length);
+  d.usesRehabEstimate = t.quick;
   d.holdingTotal = holding.propertyTaxAnnual / 12 * holdMonths + holding.insuranceAnnual / 12 * holdMonths + holding.utilitiesMonthly * holdMonths + holding.otherMonthly * holdMonths;
   d.sellingTotal = d.arv * sale.commissionPct / 100 + d.arv * sale.sellerClosingPct / 100 + (Number(sale.concessions) || 0) + (Number(sale.otherSellingCosts) || 0);
   cache.set(ck, d);
