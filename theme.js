@@ -5,5 +5,5 @@
   try { choice = localStorage.getItem('ec-theme') || 'light'; } catch (e) { /* private mode */ }
   var dark = choice === 'dark' || (choice === 'system' && window.matchMedia && matchMedia('(prefers-color-scheme: dark)').matches);
   document.documentElement.setAttribute('data-theme', dark ? 'dark' : 'light');
-  document.querySelector('meta[name=theme-color]').setAttribute('content', dark ? '#1B1916' : '#F2EDE3');
+  document.querySelector('meta[name=theme-color]').setAttribute('content', dark ? '#1C1D20' : '#F4F5F8');
 })();

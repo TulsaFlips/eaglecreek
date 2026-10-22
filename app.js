@@ -6,7 +6,7 @@
  */
 'use strict';
 
-const APP_VERSION = '1.15.0';
+const APP_VERSION = '1.16.0';
 // The record kinds kept on this device. QuickBooks, bank imports and the rest stay on the Mac.
 // planSheet and planMark are the plan reader's scales and measurements (plans.js); the Mac app
 // leaves kinds it doesn't know alone.
@@ -247,7 +247,7 @@ function applyTheme(choice = themeChoice()) {
   try { localStorage.setItem('ec-theme', choice); } catch { /* private mode */ }
   const dark = choice === 'dark' || (choice === 'system' && matchMedia('(prefers-color-scheme: dark)').matches);
   document.documentElement.dataset.theme = dark ? 'dark' : 'light';
-  $('meta[name=theme-color]')?.setAttribute('content', dark ? '#1B1916' : '#F2EDE3');
+  $('meta[name=theme-color]')?.setAttribute('content', dark ? '#1C1D20' : '#F4F5F8');
 }
 matchMedia('(prefers-color-scheme: dark)').addEventListener?.('change', () => { if (themeChoice() === 'system') applyTheme('system'); });
 
