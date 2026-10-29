@@ -62,7 +62,7 @@ function viewNotes() {
   const notes = allNotes();
   if (!notes.length && !q) {
     return emptyState('note', 'No Notes Yet', 'Quick notes, checklists and voice notes, on every device you sign in on. Pin the ones you keep coming back to, put them in folders, and tie a note to a project when it belongs to one.',
-      `<div class="btn-row" style="justify-content:center;margin-top:14px"><button class="btn primary" data-act="note-new">${icon('plus')}New Note</button><button class="btn" data-act="note-voice">${icon('mic')}Voice Note</button><button class="btn" data-act="note-new" data-kind="checklist">${icon('checkCircle')}Checklist</button></div>`);
+      `<div class="btn-row wrap" style="justify-content:center;margin-top:14px"><button class="btn primary" data-act="note-new">${icon('plus')}New Note</button><button class="btn" data-act="note-voice">${icon('mic')}Voice Note</button><button class="btn" data-act="note-new" data-kind="checklist">${icon('checkCircle')}Checklist</button></div>`);
   }
   const folders = noteFolders();
   let html = `<div class="search">${icon('search')}<input class="input" id="note-search" type="search" placeholder="Search notes" value="${esc(S.ui.notesSearch || '')}" autocomplete="off"></div>`;
