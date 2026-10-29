@@ -6,7 +6,7 @@
  */
 'use strict';
 
-const APP_VERSION = '1.19.0';
+const APP_VERSION = '1.19.1';
 // The record kinds kept on this device. QuickBooks, bank imports and the rest stay on the Mac.
 // planSheet and planMark are the plan reader's scales and measurements (plans.js); the Mac app
 // leaves kinds it doesn't know alone.
@@ -206,44 +206,9 @@ const Dictation = {
     if (this.draft.trim()) this.finals += Dictation.tidy(Dictation.sentence(this.draft), this.base + this.finals);
     this.draft = '';
     this.write('');
-    const box = this.target;
-    const base = this.base;
-    const dictated = this.finals;
     this.target = null;
     this.field = null;
     this.paint();
-    if (box && dictated.trim()) this.cleanUp(box, base, dictated);
-  },
-  /** After dictation: the words go to the tidy-text function on Supabase, which puts in the
-   *  sentences, commas, capitals and paragraphs the recognizer couldn't, and they replace what
-   *  was dictated — unless the box has been typed in since. The words themselves don't change. */
-  async cleanUp(box, base, dictated) {
-    if (!S.session || !navigator.onLine) return;
-    const expected = `${base}${dictated}`.replace(/\s+$/, '');
-    box.classList.add('tidying');
-    const note = $('#saved-note');
-    const wasNote = note?.textContent;
-    if (note) note.textContent = 'Cleaning up the dictation…';
-    try {
-      const session = await validSession();
-      const data = await api('/functions/v1/tidy-text', {
-        method: 'POST', token: session.accessToken,
-        headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text: dictated.trim() }),
-      });
-      const cleaned = String(data?.text || '').trim();
-      if (!cleaned || !box.isConnected || box.value !== expected) return;
-      box.value = base ? `${base.replace(/\s+$/, '')}\n${cleaned}` : cleaned;
-      box.dispatchEvent(new Event('input', { bubbles: true }));
-    } catch (e) {
-      if (!Dictation.warned) {
-        Dictation.warned = true;
-        const why = e instanceof ApiError && e.status === 404 ? 'The tidy-text function isn’t set up on Supabase yet (see the README).' : (e?.message || 'No answer from Supabase.');
-        toast(`Kept as dictated. ${why}`);
-      }
-    } finally {
-      box.classList.remove('tidying');
-      if (note && note.textContent === 'Cleaning up the dictation…') note.textContent = wasNote || 'Saved';
-    }
   },
   /** Point the words at a box: what's already there stays, and the dictation goes after it. */
   setTarget(box) {

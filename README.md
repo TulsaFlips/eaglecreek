@@ -326,15 +326,6 @@ and opens today's log (starting one if there isn't one), with the words landing 
 - The words come from the phone's own speech recognition (Apple's on iPhone and iPad, Google's
   in Chrome), so it needs a connection. Apple's puts in punctuation on its own; "new line",
   "new paragraph", "full stop" and "question mark" also work.
-- **Proper punctuation (1.19.0).** When you tap the mic to stop, what you dictated goes to the
-  `tidy-text` function on your Supabase project, which writes it out properly — sentences,
-  commas where a thought runs on, capitals, paragraphs — without changing a word, and it
-  replaces the raw transcript in the box a moment later (the text greys while that happens).
-  It's a one-time setup: deploy `supabase/functions/tidy-text/index.ts` from the Mac app's
-  folder (Supabase › Edge Functions › Deploy a new function › Via Editor, name it
-  `tidy-text`) and give it an `ANTHROPIC_API_KEY` secret (Edge Functions › Secrets; a key from
-  console.anthropic.com — each cleanup costs a fraction of a cent). Until it's set up, notes are
-  kept as dictated and the app says so once.
 - On an Android phone the recognizer works a phrase at a time: there's a short tone between
   phrases, and the app keeps listening on its own until you tap the mic.
 - Listening stops on its own after a long pause (iPhone); tap the mic to carry on.
