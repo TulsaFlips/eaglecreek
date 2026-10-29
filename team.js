@@ -19,7 +19,7 @@ const AREA_LABELS = {
 };
 
 /** Which part of the app each tab is (Email is the owner's alone). */
-const TAB_AREAS = { projects: 'projects', schedule: 'projects', calendar: 'projects', trips: 'travel', books: 'money', contacts: 'contacts', mail: 'owner', settings: 'any' };
+const TAB_AREAS = { projects: 'projects', notes: 'owner', schedule: 'projects', calendar: 'projects', trips: 'travel', books: 'money', contacts: 'contacts', mail: 'owner', settings: 'any' };
 
 /** "jake" → jake@team.eaglecreek.invalid; an email address stays as it is. */
 function loginAddress(text) {

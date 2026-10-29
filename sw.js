@@ -1,7 +1,7 @@
 // Eagle Creek service worker: keeps the app itself on the device so it opens instantly,
 // even with one bar of signal or none. Your data never passes through here: calls to
 // Supabase and other sites go straight to them.
-const VERSION = 'ec-1.17.0';
+const VERSION = 'ec-1.18.0';
 const SHELL = [
   './',
   './index.html',
@@ -19,6 +19,7 @@ const SHELL = [
   './money.js',
   './contracts.js',
   './travel.js',
+  './notes.js',
   './feed.js',
   './mail.js',
   './manifest.webmanifest',

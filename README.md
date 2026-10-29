@@ -61,6 +61,8 @@ sync (every few minutes, or **Sync Now**), and the other way round.
   the top with how many photos each holds: pick one to see its photos, and photos you take or
   pick then go into it. **New Folder** adds one, and the folder button in the photo viewer moves
   a photo to another folder. Folders are renamed and deleted on the Mac.
+- **Notes:** your own notes and checklists, pinned, in folders, on a project when they belong
+  to one, dictated or typed, on every device (see Notes, below).
 - **Daily Logs:** today's log in one tap, with the last log's crews carried over. Same sections
   as the Mac (Weather, Crews on Site, Work Performed, Deliveries and Inspections, Problems,
   Delays and Safety, Notes), weather filled in for the project's city, photos attached. Saves
@@ -290,6 +292,27 @@ straight to your Supabase project, and only your email and password can open it.
 
 The Mac app needs Cloud Sync turned on with the same account. If it isn't yet, set it up in the
 Mac app's Settings → Cloud Sync and run `supabase/setup.sql` in the Supabase SQL Editor.
+
+## Notes (1.18.0)
+
+A notes app of its own, in the **Notes** tab, so the phone's notes app can stay closed:
+
+- **Notes and checklists.** A note is a title and as much text as you like; a checklist is a
+  list of items to tick off (Enter adds the next item, Backspace on an empty one removes it,
+  **Remove Done** clears the ticked ones). Either turns into the other from the ⋯ menu.
+- **Pinned** notes sit on top. The rest are grouped by when they were last edited (Today,
+  Yesterday, Previous 7 Days, Previous 30 Days, then by month).
+- **Folders** are just names: move a note to one, or type a new one. The chips at the top show
+  one folder, Pinned, or everything.
+- **A project on a note** when it belongs to one, so searching the project's name finds it.
+- **Search** looks through titles, text, checklist items, folders and project names as you type.
+- **Voice notes:** the mic at the top starts listening at once and puts what you say into a new
+  note; the mic in any note adds to it (see Voice notes, below).
+- **Share, copy, duplicate, delete** from the ⋯ menu. Share hands the note to Messages, Mail or
+  anything else on the phone.
+- Saves as you type, works with no signal, and syncs through the same account as everything
+  else, so the same notes are on your phone, iPad and computer (open the app in Chrome on the
+  computer, where it has the sidebar). Notes are the owner's; team members don't see the tab.
 
 ## Voice notes (1.17.0)
 

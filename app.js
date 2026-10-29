@@ -6,15 +6,16 @@
  */
 'use strict';
 
-const APP_VERSION = '1.17.0';
+const APP_VERSION = '1.18.0';
 // The record kinds kept on this device. QuickBooks, bank imports and the rest stay on the Mac.
 // planSheet and planMark are the plan reader's scales and measurements (plans.js); the Mac app
 // leaves kinds it doesn't know alone.
 // books (the chart of accounts), transaction, commitment, changeOrder, payApp and timeEntry are
 // read for Contacts, the budget and the money pages; they're edited on the Mac.
 // trip and mileage are the Mac's Trips & Mileage; usStay (days in the US) is kept for the phone.
+// note is the Notes tab (notes.js), kept on the phone, iPad and computer alike.
 const KINDS = ['project', 'file', 'task', 'dailyLog', 'punchItem', 'event', 'contact', 'company', 'planSheet', 'planMark',
-  'transaction', 'commitment', 'changeOrder', 'payApp', 'timeEntry', 'books', 'trip', 'mileage', 'usStay', 'mailBridge'];
+  'transaction', 'commitment', 'changeOrder', 'payApp', 'timeEntry', 'books', 'trip', 'mileage', 'usStay', 'mailBridge', 'note'];
 // Eagle Creek Books' own table (`ledger_documents`, setup.sql v1.3): bank feed lines, so they can
 // be reviewed from the phone (feed.js). Each row also carries the company (`entity_id`).
 const LEDGER_KINDS = ['feedLine', 'device'];
@@ -182,7 +183,7 @@ const Dictation = {
   /** After a page renders: a voice note started from a list lands in the form's field. */
   attach(root) {
     if (!this.rec || this.target || !this.field) return;
-    const box = root.querySelector(`#log-form textarea[name="${this.field}"]`);
+    const box = root.querySelector(`#log-form textarea[name="${this.field}"], #note-form textarea[name="${this.field}"]`);
     if (box) { this.setTarget(box); this.paint(); }
   },
   write(interim) {
@@ -1471,6 +1472,7 @@ function renderHeader() {
 // The Mac's sidebar screens and their icon colours.
 const TABS = [
   ['projects', 'Projects', 'folder', 'var(--forest)'],
+  ['notes', 'Notes', 'note', 'var(--gold)'],
   ['schedule', 'Schedule', 'schedule', 'var(--gold)'],
   ['calendar', 'Calendar', 'calendar', 'var(--clay)'],
   ['trips', 'Trips', 'airplane', 'var(--slate)'],
@@ -1493,6 +1495,7 @@ function renderTabs(active) {
 
 function render() {
   flushLogSave();
+  if (typeof flushNoteSave === 'function') flushNoteSave();
   const main = $('#main');
   if (LOCK.isLocked()) {
     if ($('#lock-screen')) return; // already up; a re-render would drop the digits typed so far
@@ -1522,7 +1525,7 @@ function render() {
   const r = route();
   let html = '';
   let tab = r.name;
-  const tabOf = { project: 'projects', log: 'projects', contact: 'contacts', trip: 'trips' }[r.name] || (TAB_AREAS[r.name] ? r.name : 'projects');
+  const tabOf = { project: 'projects', log: 'projects', contact: 'contacts', trip: 'trips', note: 'notes' }[r.name] || (TAB_AREAS[r.name] ? r.name : 'projects');
   try {
     if (!canViewTab(tabOf)) { html = viewNoAccess(tabOf); tab = tabOf; } else switch (r.name) {
       case 'project': html = viewProject(r.a, r.b || 'overview'); tab = 'projects'; break;
@@ -1536,6 +1539,8 @@ function render() {
       case 'trips': html = viewTrips(r.a || 'list'); break;
       case 'trip': html = viewTrip(r.a); tab = 'trips'; break;
       case 'mail': html = viewMail(r.a || 'business'); break;
+      case 'notes': html = viewNotes(); break;
+      case 'note': html = viewNote(r.a); tab = 'notes'; break;
       default: html = viewProjects(); tab = 'projects';
     }
   } catch (e) {
