@@ -64,7 +64,7 @@ sync (every few minutes, or **Sync Now**), and the other way round.
 - **Daily Logs:** today's log in one tap, with the last log's crews carried over. Same sections
   as the Mac (Weather, Crews on Site, Work Performed, Deliveries and Inspections, Problems,
   Delays and Safety, Notes), weather filled in for the project's city, photos attached. Saves
-  as you type.
+  as you type. **Voice Note** opens today's log and takes down what you say (see Voice notes).
 - **Punch List:** add items; the square marks them done, as on the Mac. Ready to check is in each
   item's details.
 - **Schedule:** the Mac's dates (workdays, US holidays, tasks that wait on others). Set Not
@@ -290,6 +290,23 @@ straight to your Supabase project, and only your email and password can open it.
 
 The Mac app needs Cloud Sync turned on with the same account. If it isn't yet, set it up in the
 Mac app's Settings → Cloud Sync and run `supabase/setup.sql` in the Supabase SQL Editor.
+
+## Voice notes (1.17.0)
+
+Every notes box (a daily log's Work Performed, Deliveries, Inspections, Visitors, Problems,
+Safety and Notes, a task's notes, an event's notes) has a mic. Tap it, talk, tap it again:
+the words go into the box as they're recognised and save like typing would, after whatever
+was already there. On a project's Daily Logs page, **Voice Note** starts listening at once
+and opens today's log (starting one if there isn't one), with the words landing in Notes.
+
+- The first time, the phone asks to allow the microphone for the app.
+- The words come from the phone's own speech recognition (Apple's on iPhone and iPad, Google's
+  in Chrome), so it needs a connection. Apple's puts in punctuation on its own; "new line",
+  "new paragraph", "full stop" and "question mark" also work.
+- Listening stops on its own after a long pause; tap the mic to carry on.
+- If the mic on the page says dictation isn't available (iOS doesn't give it to every
+  home-screen install), tap into the box and use the keyboard's own mic key, which always
+  works.
 
 ## The team (1.14.0)
 

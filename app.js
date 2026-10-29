@@ -6,7 +6,7 @@
  */
 'use strict';
 
-const APP_VERSION = '1.16.0';
+const APP_VERSION = '1.17.0';
 // The record kinds kept on this device. QuickBooks, bank imports and the rest stay on the Mac.
 // planSheet and planMark are the plan reader's scales and measurements (plans.js); the Mac app
 // leaves kinds it doesn't know alone.
@@ -117,6 +117,97 @@ function parseInputDate(v, time) {
   const [hh, mm] = (time || '00:00').split(':').map(Number);
   return new Date(y, m - 1, d, hh || 0, mm || 0);
 }
+
+// ----- Voice notes: dictation into any text box, with the phone's own speech recognition.
+// On iPhone and iPad the words come from Apple's dictation; in Chrome from Google's. The text
+// goes into the box as it's recognised, and saves like typing would. Where the app can't use
+// speech recognition (some home-screen installs), the keyboard's own mic key still works.
+const SpeechRec = window.SpeechRecognition || window.webkitSpeechRecognition || null;
+const Dictation = {
+  rec: null, target: null, field: null, base: '', finals: '',
+  supported() { return !!SpeechRec; },
+  /** Begin listening into `box` (a textarea), or — with `field` and no box — into that field of
+   *  the next form rendered (see attach). Returns false when dictation can't start. */
+  start(box, { field = null } = {}) {
+    if (!SpeechRec) { toast('Dictation isn’t available in this app on this device. Tap into the box and use the keyboard’s mic key instead.'); return false; }
+    if (this.rec) this.stop();
+    const rec = new SpeechRec();
+    rec.continuous = true;
+    rec.interimResults = true;
+    rec.lang = navigator.language || 'en-US';
+    this.rec = rec;
+    this.finals = '';
+    this.field = field;
+    this.setTarget(box);
+    rec.onresult = (e) => {
+      let interim = '';
+      for (let i = e.resultIndex; i < e.results.length; i++) {
+        const r = e.results[i];
+        if (r.isFinal) this.finals += Dictation.tidy(r[0].transcript, this.base + this.finals); else interim += r[0].transcript;
+      }
+      this.write(interim);
+    };
+    rec.onerror = (e) => {
+      if (this.rec !== rec) return;
+      const why = e.error;
+      if (why === 'not-allowed' || why === 'service-not-allowed') toast('The microphone is off for Eagle Creek. Allow it in Settings › Safari (or the browser’s site settings) and try again.');
+      else if (why === 'no-speech') toast('Didn’t hear anything.');
+      else if (why === 'network') toast('Dictation needs a connection.');
+      else if (why !== 'aborted') toast('Dictation stopped.');
+      this.stop();
+    };
+    rec.onend = () => { if (this.rec === rec) this.stop(); };
+    try { rec.start(); } catch (err) { console.error(err); this.rec = null; toast('Couldn’t start dictation.'); return false; }
+    this.paint();
+    toast('Listening… tap the mic again when you’re done.');
+    return true;
+  },
+  stop() {
+    const rec = this.rec;
+    this.rec = null;
+    if (rec) { rec.onresult = rec.onerror = rec.onend = null; try { rec.stop(); } catch { /* already stopped */ } }
+    this.write('');
+    this.target = null;
+    this.field = null;
+    this.paint();
+  },
+  /** Point the words at a box: what's already there stays, and the dictation goes after it. */
+  setTarget(box) {
+    this.target = box || null;
+    if (!box) return;
+    const have = box.value.replace(/\s+$/, '');
+    this.base = have ? `${have}${/[.!?]$/.test(have) ? ' ' : '. '}` : '';
+    this.write('');
+  },
+  /** After a page renders: a voice note started from a list lands in the form's field. */
+  attach(root) {
+    if (!this.rec || this.target || !this.field) return;
+    const box = root.querySelector(`#log-form textarea[name="${this.field}"]`);
+    if (box) { this.setTarget(box); this.paint(); }
+  },
+  write(interim) {
+    const box = this.target;
+    if (!box || !box.isConnected) return;
+    const text = `${this.base}${this.finals}${interim}`.replace(/\s+$/, '');
+    if (box.value === text) return;
+    box.value = text;
+    box.dispatchEvent(new Event('input', { bubbles: true }));
+  },
+  /** Line breaks and a little spoken punctuation (Apple's dictation handles the rest itself). */
+  tidy(chunk, before = '') {
+    let t = chunk.replace(/\s+/g, ' ').trim();
+    if (!t) return '';
+    if (/(^|[.!?]|\n)\s*$/.test(before)) t = t[0].toUpperCase() + t.slice(1);
+    t = t.replace(/\s*\b(new paragraph)\b\s*/gi, '\n\n').replace(/\s*\b(new line)\b\s*/gi, '\n')
+      .replace(/\s*\bfull stop\b/gi, '.').replace(/\s*\bquestion mark\b/gi, '?').replace(/\s*\bexclamation (point|mark)\b/gi, '!');
+    t = t.replace(/([.!?]\s+|\n)([a-z])/g, (m, a, b) => a + b.toUpperCase());
+    return `${t}${/[\n]$/.test(t) ? '' : ' '}`;
+  },
+  paint() {
+    $$('.mic').forEach((b) => b.classList.toggle('on', !!this.target && b.closest('.dictate-wrap')?.querySelector('textarea') === this.target));
+    document.body.classList.toggle('dictating', !!this.rec);
+  },
+};
 
 function toast(text) {
   const el = $('#toast');
@@ -1460,12 +1551,18 @@ function render() {
   render.lastHash = location.hash;
   hydrateThumbs();
   $$('textarea', main).forEach(autoGrow);
+  Dictation.attach(main);
   if (!sameView) $$('#main > nav.seg .on').forEach((el) => el.scrollIntoView({ block: 'nearest', inline: 'center' }));
 }
 
 function autoGrow(t) {
   t.style.height = 'auto';
   t.style.height = `${Math.max(t.scrollHeight + 2, Number(t.dataset.min) || 46)}px`;
+}
+
+/** A text box with a mic for dictation (voice notes). `attrs` go on the textarea. */
+function dictatedArea(attrs, value = '') {
+  return `<span class="dictate-wrap"><textarea ${attrs}>${esc(value || '')}</textarea><button type="button" class="mic" data-act="dictate" aria-label="Dictate">${icon('mic')}</button></span>`;
 }
 
 // ----- Building blocks (the Mac's Card, StatusPill, MetricTile, ContentUnavailableView)
@@ -1770,10 +1867,11 @@ function projectLogs(p) {
   const pid = esc(key(p.id));
   const logs = all('dailyLog').filter((l) => sameId(l.projectID, p.id)).sort((a, b) => b.date - a.date);
   const todayBtn = `<button class="btn primary sm" data-act="today-log" data-project="${pid}">${icon('plus')}Today</button>`;
+  const voiceBtn = `<button class="btn sm" data-act="voice-note" data-project="${pid}">${icon('mic')}Voice Note</button>`;
   if (!logs.length) {
-    return emptyState('book', 'No Daily Logs', 'A short note each day protects you on delays, disputes and draws. Tap Today to start.', `<div class="btn-row" style="justify-content:center;margin-top:14px">${todayBtn}<button class="btn sm" data-act="log-other-day" data-project="${pid}">${icon('calendar')}Another Day…</button></div>`);
+    return emptyState('book', 'No Daily Logs', 'A short note each day protects you on delays, disputes and draws. Tap Today to start.', `<div class="btn-row" style="justify-content:center;margin-top:14px">${todayBtn}${voiceBtn}<button class="btn sm" data-act="log-other-day" data-project="${pid}">${icon('calendar')}Another Day…</button></div>`);
   }
-  return `<div class="page-bar"><span class="count">${plural(logs.length, 'log')}</span><span style="display:flex;gap:8px"><button class="btn sm" data-act="log-other-day" data-project="${pid}">${icon('calendar')}Another Day…</button>${todayBtn}</span></div>
+  return `<div class="page-bar"><span class="count">${plural(logs.length, 'log')}</span><span style="display:flex;gap:8px"><button class="btn sm" data-act="log-other-day" data-project="${pid}">${icon('calendar')}Another Day…</button>${voiceBtn}${todayBtn}</span></div>
     <section class="card flush">${logs.map(logRow).join('')}</section>`;
 }
 
@@ -1967,7 +2065,7 @@ function viewLog(id) {
   const names = [...new Set(contacts().map((c) => c.name).filter(Boolean))];
   const photos = filesFor('recordID', l.id).sort((a, b) => (a.addedAt || 0) - (b.addedAt || 0));
   const lid = esc(key(l.id));
-  const area = (name, label, ph = '') => `<label class="field"><span>${label}</span><textarea name="${name}" placeholder="${esc(ph)}" rows="1">${esc(l[name] || '')}</textarea></label>`;
+  const area = (name, label, ph = '') => `<label class="field"><span>${label}</span>${dictatedArea(`name="${name}" placeholder="${esc(ph)}" rows="1"`, l[name])}</label>`;
   const crews = (l.crews || []).map((c, i) => `<div class="crew" data-crew="${i}">
       <div class="crew-head"><span>Crew ${i + 1}</span><button type="button" class="btn link danger" data-act="crew-remove" data-i="${i}">Remove</button></div>
       <div class="crew-grid">
@@ -1994,7 +2092,7 @@ function viewLog(id) {
     <div class="form-section"><div class="fs-head">${fsTitle('hardhat', 'Crews on Site')}<button type="button" class="btn link" data-act="crew-add">${icon('plus')}Add Crew</button></div>
       <div class="form-card">${crews || '<div class="empty-line" style="padding:2px 0 12px">No crews listed.</div>'}</div></div>
     <div class="form-section"><div class="fs-head">${fsTitle('hammer', 'Work Performed')}</div><div class="form-card">
-      <label class="field"><span class="sr">Work performed</span><textarea name="workPerformed" placeholder="What got done today" rows="3" data-min="96">${esc(l.workPerformed || '')}</textarea></label>
+      <label class="field"><span class="sr">Work performed</span>${dictatedArea('name="workPerformed" placeholder="What got done today" rows="3" data-min="96"', l.workPerformed)}</label>
     </div></div>
     <div class="form-section"><div class="fs-head">${fsTitle('truck', 'Deliveries and Inspections')}</div><div class="form-card">
       ${area('deliveries', 'Deliveries', 'Lumber package, windows…')}
@@ -2282,7 +2380,7 @@ function sheetTask(id) {
     <div class="form-section"><div class="fs-head">Status</div><div class="two">${Object.entries(WORK).map(([k, [label, color]]) => `<button class="btn ${k === ws ? 'primary' : ''}" data-act="task-status" data-id="${esc(key(t.id))}" data-status="${k}"><span class="dot-label" style="--c:${k === ws ? 'var(--on-accent)' : color}">${label}</span></button>`).join('')}</div></div>
     <div class="form-section"><div class="form-card">
       <label class="field"><span>Percent complete · <b id="pct-label">${Math.round(t.percentComplete || 0)}%</b></span><input type="range" id="task-pct" min="0" max="100" step="5" value="${Math.round(t.percentComplete || 0)}"></label>
-      <label class="field"><span>Notes</span><textarea id="task-notes" rows="2">${esc(t.notes || '')}</textarea></label>
+      <label class="field"><span>Notes</span>${dictatedArea('id="task-notes" rows="2"', t.notes)}</label>
     </div></div>
     <div class="sheet-actions"><button class="btn" data-act="sheet-close">Cancel</button><button class="btn primary" data-act="task-save" data-id="${esc(key(t.id))}">Save</button></div>
     ${p && route().name !== 'project' ? `<a class="btn link block" style="margin-top:8px" href="#/project/${esc(key(p.id))}/schedule">Open ${esc(projectName(p))}</a>` : ''}
@@ -2369,7 +2467,7 @@ function sheetEvent(id, opts = {}) {
         <label class="field"><span>Project</span><select name="projectID"><option value="">None</option>${jobs.map((p) => `<option value="${esc(p.id)}" ${sameId(p.id, ev?.projectID) ? 'selected' : ''}>${esc(projectName(p))}</option>`).join('')}</select></label>
         <label class="field"><span>With</span><select name="contactID"><option value="">Nobody</option>${contacts().map((c) => `<option value="${esc(c.id)}" ${sameId(c.id, ev?.contactID) ? 'selected' : ''}>${esc(c.name)}</option>`).join('')}</select></label>
         <label class="field"><span>Location</span><input name="location" value="${esc(ev?.location || '')}"></label>
-        <label class="field"><span>Notes</span><textarea name="notes" rows="2">${esc(ev?.notes || '')}</textarea></label>
+        <label class="field"><span>Notes</span>${dictatedArea('name="notes" rows="2"', ev?.notes)}</label>
       </div></div>
       <div class="sheet-actions"><button type="button" class="btn" data-act="sheet-close">Cancel</button><button type="submit" class="btn primary">${existing ? 'Save' : 'Add Event'}</button></div>
       ${existing ? `<div class="sheet-actions" style="margin-top:10px">${repeating && occurrence ? `<button type="button" class="btn danger" data-act="event-skip">Delete Only This One…</button>` : ''}<button type="button" class="btn danger" data-act="event-delete">${repeating ? 'Delete All Repeats…' : 'Delete…'}</button></div>` : ''}
@@ -2620,6 +2718,14 @@ const ACTIONS = {
   },
 
   'today-log': (el) => openOrCreateLog(el.dataset.project),
+  // Starts listening right away (the tap is what lets the mic open), then opens today's log;
+  // what's said lands in its Notes once the form is on screen.
+  'voice-note': (el) => { if (Dictation.start(null, { field: 'notes' })) return openOrCreateLog(el.dataset.project); },
+  'dictate': (el) => {
+    const box = el.closest('.dictate-wrap')?.querySelector('textarea');
+    if (!box) return;
+    if (Dictation.target === box) Dictation.stop(); else Dictation.start(box);
+  },
   'log-other-day': (el) => {
     openSheet(`${sheetHead('Log for Another Day')}
       <div class="form-section"><div class="form-card"><label class="field"><span>Day</span><input type="date" id="other-day" value="${fmt.inputDate(addDays(new Date(), -1))}" max="${fmt.inputDate(new Date())}"></label></div>

@@ -17,6 +17,7 @@ Object.assign(ICONS, {
   clock: '<circle cx="12" cy="12" r="8.6"/><path d="M12 7.5V12l3 2"/>',
   hourglass: '<path d="M6.5 3.5h11M6.5 20.5h11"/><path d="M8 3.5v2.8a4 4 0 0 0 4 4 4 4 0 0 0 4-4V3.5M8 20.5v-2.8a4 4 0 0 1 4-4 4 4 0 0 1 4 4v2.8"/>',
   note: '<path d="M5 4h14v10.5L13.5 20H5z"/><path d="M13.5 20v-5.5H19M8.5 8.5h7M8.5 12h4.5"/>',
+  mic: '<rect x="9" y="3" width="6" height="11" rx="3"/><path d="M6 11.5a6 6 0 0 0 12 0M12 17.5V21M9 21h6"/>',
   tag: '<path d="M3.5 12.3V4.5a1 1 0 0 1 1-1h7.8l8.7 8.7-8.8 8.8z"/><circle cx="8" cy="8" r="1.4"/>',
   logout: '<path d="M10 4H6.5A1.5 1.5 0 0 0 5 5.5v13A1.5 1.5 0 0 0 6.5 20H10"/><path d="m14.5 8 4 4-4 4M18.5 12H9.5"/>',
   device: '<rect x="6.5" y="3" width="11" height="18" rx="2.2"/><path d="M11 17.6h2"/>',

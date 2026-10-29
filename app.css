@@ -246,6 +246,12 @@ nav.tabs a.on .ic { opacity: 1; }
 .field input[type=range] { -webkit-appearance: auto; appearance: auto; accent-color: var(--forest); padding: 0; border: 0; background: none; min-height: 36px; }
 .field select { background-image: linear-gradient(45deg, transparent 50%, var(--muted) 50%), linear-gradient(135deg, var(--muted) 50%, transparent 50%); background-position: calc(100% - 18px) 19px, calc(100% - 13px) 19px; background-size: 5px 5px; background-repeat: no-repeat; padding-right: 32px; }
 .field textarea { min-height: 46px; resize: none; line-height: 1.45; overflow: hidden; }
+.dictate-wrap { display: block; position: relative; }
+.dictate-wrap textarea { padding-right: 46px; }
+.mic { position: absolute; right: 6px; top: 6px; width: 34px; height: 34px; border-radius: 50%; border: 0; background: none; color: var(--muted); display: flex; align-items: center; justify-content: center; padding: 0; cursor: pointer; }
+.mic .ic { width: 20px; height: 20px; }
+.mic.on { color: #fff; background: var(--danger); animation: mic-pulse 1.2s ease-in-out infinite; }
+@keyframes mic-pulse { 0%, 100% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--danger) 45%, transparent); } 50% { box-shadow: 0 0 0 7px transparent; } }
 .input:focus, .field input:focus, .field select:focus, .field textarea:focus { outline: 2px solid color-mix(in srgb, var(--forest) 55%, transparent); outline-offset: -1px; }
 .two { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
 .crew-grid { display: grid; grid-template-columns: minmax(0, 1.6fr) minmax(0, .7fr) minmax(0, .7fr); gap: 8px; }
