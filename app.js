@@ -6,7 +6,7 @@
  */
 'use strict';
 
-const APP_VERSION = '1.18.1';
+const APP_VERSION = '1.18.2';
 // The record kinds kept on this device. QuickBooks, bank imports and the rest stay on the Mac.
 // planSheet and planMark are the plan reader's scales and measurements (plans.js); the Mac app
 // leaves kinds it doesn't know alone.
@@ -124,49 +124,87 @@ function parseInputDate(v, time) {
 // goes into the box as it's recognised, and saves like typing would. Where the app can't use
 // speech recognition (some home-screen installs), the keyboard's own mic key still works.
 const SpeechRec = window.SpeechRecognition || window.webkitSpeechRecognition || null;
+// Android's Chrome re-sends the whole phrase on every update, each marked final, so there it
+// listens one phrase at a time (the phrase replaces its draft until it's final, then is kept
+// once) and starts listening again on its own until the mic is tapped.
+const ANDROID_SPEECH = /Android/i.test(navigator.userAgent);
 const Dictation = {
-  rec: null, target: null, field: null, base: '', finals: '',
+  rec: null, target: null, field: null, base: '', finals: '', draft: '', lastFinal: '', keepGoing: false,
   supported() { return !!SpeechRec; },
   /** Begin listening into `box` (a textarea), or — with `field` and no box — into that field of
    *  the next form rendered (see attach). Returns false when dictation can't start. */
   start(box, { field = null } = {}) {
     if (!SpeechRec) { toast('Dictation isn’t available in this app on this device. Tap into the box and use the keyboard’s mic key instead.'); return false; }
     if (this.rec) this.stop();
+    this.finals = '';
+    this.draft = '';
+    this.lastFinal = '';
+    this.field = field;
+    this.keepGoing = true;
+    this.setTarget(box);
+    if (!this.listen()) return false;
+    this.paint();
+    toast('Listening… tap the mic again when you’re done.');
+    return true;
+  },
+  /** One recognition session. Returns false when it couldn't start. */
+  listen() {
     const rec = new SpeechRec();
-    rec.continuous = true;
+    rec.continuous = !ANDROID_SPEECH;
     rec.interimResults = true;
     rec.lang = navigator.language || 'en-US';
     this.rec = rec;
-    this.finals = '';
-    this.field = field;
-    this.setTarget(box);
     rec.onresult = (e) => {
+      if (this.rec !== rec) return;
+      if (ANDROID_SPEECH) {
+        // The newest result is the whole phrase so far; keep it as the draft until the session ends.
+        const last = e.results[e.results.length - 1];
+        this.draft = last ? last[0].transcript : '';
+        this.write('');
+        return;
+      }
       let interim = '';
       for (let i = e.resultIndex; i < e.results.length; i++) {
         const r = e.results[i];
-        if (r.isFinal) this.finals += Dictation.tidy(r[0].transcript, this.base + this.finals); else interim += r[0].transcript;
+        const text = r[0].transcript;
+        if (!r.isFinal) { interim += text; continue; }
+        // Some phones send the same final twice.
+        if (text.trim() && text.trim() === this.lastFinal) continue;
+        this.lastFinal = text.trim();
+        this.finals += Dictation.tidy(text, this.base + this.finals);
       }
       this.write(interim);
     };
     rec.onerror = (e) => {
       if (this.rec !== rec) return;
       const why = e.error;
-      if (why === 'not-allowed' || why === 'service-not-allowed') toast('The microphone is off for Eagle Creek. Allow it in Settings › Safari (or the browser’s site settings) and try again.');
+      if (why === 'no-speech' && ANDROID_SPEECH) return; // the session ends; onend starts the next
+      if (why === 'not-allowed' || why === 'service-not-allowed') toast('The microphone is off for Eagle Creek. Allow it in the browser’s site settings (or Settings › Safari) and try again.');
       else if (why === 'no-speech') toast('Didn’t hear anything.');
       else if (why === 'network') toast('Dictation needs a connection.');
       else if (why !== 'aborted') toast('Dictation stopped.');
+      this.keepGoing = false;
       this.stop();
     };
-    rec.onend = () => { if (this.rec === rec) this.stop(); };
+    rec.onend = () => {
+      if (this.rec !== rec) return;
+      // The phrase is done: keep it, then listen for the next one.
+      if (this.draft.trim()) this.finals += Dictation.tidy(Dictation.sentence(this.draft), this.base + this.finals);
+      this.draft = '';
+      this.write('');
+      if (ANDROID_SPEECH && this.keepGoing && this.listen()) return;
+      this.stop();
+    };
     try { rec.start(); } catch (err) { console.error(err); this.rec = null; toast('Couldn’t start dictation.'); return false; }
-    this.paint();
-    toast('Listening… tap the mic again when you’re done.');
     return true;
   },
   stop() {
     const rec = this.rec;
     this.rec = null;
+    this.keepGoing = false;
     if (rec) { rec.onresult = rec.onerror = rec.onend = null; try { rec.stop(); } catch { /* already stopped */ } }
+    if (this.draft.trim()) this.finals += Dictation.tidy(Dictation.sentence(this.draft), this.base + this.finals);
+    this.draft = '';
     this.write('');
     this.target = null;
     this.field = null;
@@ -189,10 +227,16 @@ const Dictation = {
   write(interim) {
     const box = this.target;
     if (!box || !box.isConnected) return;
-    const text = `${this.base}${this.finals}${interim}`.replace(/\s+$/, '');
+    const text = `${this.base}${this.finals}${this.draft || interim}`.replace(/\s+$/, '');
     if (box.value === text) return;
     box.value = text;
     box.dispatchEvent(new Event('input', { bubbles: true }));
+  },
+  /** A phrase from a recognizer that never punctuates (Android's): ends it with a period, since
+   *  phrases end on pauses, which are mostly the ends of sentences. */
+  sentence(phrase) {
+    const t = phrase.trim();
+    return t && !/[.!?…:,;]$/.test(t) ? `${t}.` : t;
   },
   /** Line breaks and a little spoken punctuation (Apple's dictation handles the rest itself). */
   tidy(chunk, before = '') {
