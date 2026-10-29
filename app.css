@@ -251,6 +251,7 @@ nav.tabs a.on .ic { opacity: 1; }
 .mic { position: absolute; right: 6px; top: 6px; width: 34px; height: 34px; border-radius: 50%; border: 0; background: none; color: var(--muted); display: flex; align-items: center; justify-content: center; padding: 0; cursor: pointer; }
 .mic .ic { width: 20px; height: 20px; }
 .mic.on { color: #fff; background: var(--danger); animation: mic-pulse 1.2s ease-in-out infinite; }
+textarea.tidying { color: var(--muted); transition: color .2s; }
 @keyframes mic-pulse { 0%, 100% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--danger) 45%, transparent); } 50% { box-shadow: 0 0 0 7px transparent; } }
 .input:focus, .field input:focus, .field select:focus, .field textarea:focus { outline: 2px solid color-mix(in srgb, var(--forest) 55%, transparent); outline-offset: -1px; }
 .two { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
