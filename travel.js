@@ -738,7 +738,9 @@ function sheetDrive({ id = null, tripID = null } = {}) {
     };
     f.elements.tripID.addEventListener('change', hintOdometer);
     f.elements.odometerEnd.addEventListener('input', (e) => { if (e.isTrusted) f.elements.odometerEnd.dataset.typed = f.elements.odometerEnd.value ? '1' : ''; });
-    if (existing && m.odometerEnd) f.elements.odometerEnd.dataset.typed = '1';
+    // An existing drive's ending reading keeps following the distance when it was worked out
+    // from it; one set by hand to something else is left alone.
+    if (existing && m.odometerEnd && Math.abs(m.odometerEnd - (m.odometerStart + totalMiles(m))) > 0.15) f.elements.odometerEnd.dataset.typed = '1';
     f.elements.odometerEnd.addEventListener('input', hintOdometer);
     f.elements.vehicle.addEventListener('input', hintOdometer);
     f.elements.vehicle.addEventListener('change', hintOdometer);
