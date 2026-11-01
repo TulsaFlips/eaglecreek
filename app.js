@@ -6,7 +6,7 @@
  */
 'use strict';
 
-const APP_VERSION = '1.23.0';
+const APP_VERSION = '1.23.1';
 // The record kinds kept on this device. QuickBooks, bank imports and the rest stay on the Mac.
 // planSheet and planMark are the plan reader's scales and measurements (plans.js); the Mac app
 // leaves kinds it doesn't know alone.
@@ -2989,6 +2989,7 @@ LOCK.onWipe = async (reason) => {
 
 /** Reads what the device holds (sealed until now) and carries on where the app left off. */
 async function afterUnlock() {
+  if (reloadForUpdate()) return;
   await loadDeviceState();
   bump();
   render();
@@ -3322,7 +3323,8 @@ document.addEventListener('visibilitychange', async () => {
 function reloadForUpdate() {
   if (!S.updateReady) return false;
   const a = document.activeElement;
-  const busy = $('#sheet-root').children.length || (a && /INPUT|TEXTAREA|SELECT/.test(a.tagName)) || S.meta.uploads.length && S.syncing;
+  // Not while the lock screen is up either: a reload mid-PIN looks like the app forgot it.
+  const busy = LOCK.isLocked() || $('#sheet-root').children.length || (a && /INPUT|TEXTAREA|SELECT/.test(a.tagName)) || S.meta.uploads.length && S.syncing;
   if (busy) return false;
   flushLogSave();
   setTimeout(() => location.reload(), 300);
@@ -3355,19 +3357,44 @@ async function boot() {
   }
   S.ui.lastDay = new Date();
   bump();
-  render();
-  if (S.session && !locked && !lockNeedsSetup()) { syncNow(); startAutoSync(); }
   if ('serviceWorker' in navigator && location.protocol !== 'file:') {
-    // A new version published to the site takes over when it's safe: not while you're typing or
-    // in the middle of a form, so nothing is lost.
+    // A new version published to the site takes over when it's safe: not while you're typing,
+    // in the middle of a form or at the lock screen, so nothing is lost.
     const hadController = !!navigator.serviceWorker.controller;
+    let settle;
+    const settled = new Promise((r) => { settle = r; });
     navigator.serviceWorker.addEventListener('controllerchange', () => {
       if (!hadController || S.updateReady) return;
       S.updateReady = true;
+      if (S.splash) { settle('update'); return; }
       reloadForUpdate();
     });
-    navigator.serviceWorker.register('sw.js').catch(() => {});
+    const reg = navigator.serviceWorker.register('sw.js').catch(() => null);
+    if (hadController && navigator.onLine) {
+      // The logo, full screen, while the site is checked for a new version (a few seconds at
+      // most), so an update can reload now rather than halfway through the PIN.
+      S.splash = true;
+      $('#main').innerHTML = `<div class="splash"><img class="logo" src="icon-180.png" alt="Eagle Creek"></div>`;
+      $('#tabs')?.classList.add('hidden');
+      document.body.classList.add('splashing');
+      reg.then(async (r) => {
+        try { await r?.update(); } catch { /* offline or blocked: carry on */ }
+        const w = r?.installing || r?.waiting;
+        if (!w) { settle('none'); return; }
+        // A new version is loading: wait for it to take over (it reloads) or give up.
+        w.addEventListener('statechange', () => { if (w.state === 'redundant') settle('none'); });
+      });
+      const shown = Date.now();
+      const why = await Promise.race([settled, new Promise((r) => setTimeout(() => r('timeout'), 4000))]);
+      // On screen half a second at least, so it reads as the launch screen, not a flicker.
+      await new Promise((r) => setTimeout(r, Math.max(0, 500 - (Date.now() - shown))));
+      S.splash = false;
+      document.body.classList.remove('splashing');
+      if (why === 'update') { flushLogSave(); location.reload(); return; }
+    }
   }
+  render();
+  if (S.session && !locked && !lockNeedsSetup()) { syncNow(); startAutoSync(); }
   // Ask the browser to keep this app's data even when space runs low.
   navigator.storage?.persist?.().catch(() => {});
 }
