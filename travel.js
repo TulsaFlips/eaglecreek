@@ -1099,6 +1099,22 @@ document.addEventListener('submit', async (e) => {
     const m = readDriveForm(f, existing);
     if (!(m.miles > 0)) { f.elements.distance.focus(); toast('Enter the distance.'); return; }
     await saveRecord('mileage', m);
+    // A changed ending reading moves the drives after it on the same trip (or, with no trip,
+    // on no trip) by the same amount, start and end alike, so their own miles don't change.
+    const oldEnd = Number(existing?.odometerEnd) || 0, newEnd = Number(m.odometerEnd) || 0;
+    const shift = oldEnd && newEnd ? Math.round((newEnd - oldEnd) * 10) / 10 : 0;
+    let shifted = 0;
+    if (shift) {
+      const pool = (m.tripID ? tripMileage(m.tripID) : all('mileage').filter((x) => !x.tripID).sort(driveOrder));
+      for (const x of pool) {
+        if (sameId(x.id, m.id) || driveOrder(x, existing || m) <= 0 || !(Number(x.odometerStart) || Number(x.odometerEnd))) continue;
+        const y = clone(x);
+        if (Number(y.odometerStart)) y.odometerStart = Math.round((Number(y.odometerStart) + shift) * 10) / 10;
+        if (Number(y.odometerEnd)) y.odometerEnd = Math.round((Number(y.odometerEnd) + shift) * 10) / 10;
+        await saveRecord('mileage', y);
+        shifted++;
+      }
+    }
     const posted = existing ? mileagePosted(existing) : null;
     if (posted && !booksClosedOn(posted.date) && !booksClosedOn(m.date)) {
       const t = mileageExpense(m, posted);
@@ -1108,7 +1124,7 @@ document.addEventListener('submit', async (e) => {
       if (contributionFor(t.id)) await setContributed(t, true);
     }
     closeSheet();
-    toast(existing ? 'Saved' : 'Drive logged');
+    toast(shifted ? `Saved · ${plural(shifted, 'later drive')} moved ${shift > 0 ? '+' : ''}${tenths(shift)} on the odometer` : existing ? 'Saved' : 'Drive logged');
   }
   if (f.id === 'stay-form') {
     const a = parseInputDate(v('arrive')), b = parseInputDate(v('leave'));

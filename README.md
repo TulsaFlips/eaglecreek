@@ -105,7 +105,9 @@ sync (every few minutes, or **Sync Now**), and the other way round.
   Mileage page changes to km on that device. Odometer start shows, in grey, where the last drive
   on that trip ended (a rental is that trip's car; drives on no trip, your own vehicle, go by
   each other): the highest reading on the latest day, a hint only; nothing is filled in. Odometer end
-  is filled in from Odometer start plus the distance (both ways on a round trip) until typed over. Stored in miles for the Mac, at the IRS
+  is filled in from Odometer start plus the distance (both ways on a round trip) until typed over.
+  Changing a drive's ending reading moves every later drive on that trip by the same amount, start
+  and end alike, so their own miles stay put. Stored in miles for the Mac, at the IRS
   rate per mile, then posted to the books as owed back or as your contribution.
 - **Days in the US:** counted from trips (any part of a day counts) and any other stays you add,
   with this year's count, the last 365 days, and the weighted three-year total the IRS uses for

@@ -6,7 +6,7 @@
  */
 'use strict';
 
-const APP_VERSION = '1.21.1';
+const APP_VERSION = '1.22.0';
 // The record kinds kept on this device. QuickBooks, bank imports and the rest stay on the Mac.
 // planSheet and planMark are the plan reader's scales and measurements (plans.js); the Mac app
 // leaves kinds it doesn't know alone.
