@@ -102,8 +102,9 @@ sync (every few minutes, or **Sync Now**), and the other way round.
   owed back). Switch any personal purchase between the two later, or turn part of what the company
   owes you into a contribution in one go (Trips › Paid Personally).
 - **Mileage in miles (or kilometres):** log each drive in miles by default; the switch on the
-  Mileage page changes to km on that device. Stored in miles for the Mac, at the IRS rate per mile,
-  then posted to the books as owed back or as your contribution.
+  Mileage page changes to km on that device. Odometer start shows, in grey, where the last drive
+  in that vehicle ended (a hint only; nothing is filled in). Stored in miles for the Mac, at the IRS
+  rate per mile, then posted to the books as owed back or as your contribution.
 - **Days in the US:** counted from trips (any part of a day counts) and any other stays you add,
   with this year's count, the last 365 days, and the weighted three-year total the IRS uses for
   its substantial presence test. It's a count, not tax advice; your cross-border accountant can
