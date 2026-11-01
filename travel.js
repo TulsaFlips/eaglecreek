@@ -205,16 +205,20 @@ const tenths = (v) => (Math.round(v * 10) / 10).toLocaleString('en-US', { maximu
 const distanceText = (miles, unit = distanceUnit()) => (unit === 'km' ? `${tenths(miles * KM_PER_MILE)} km` : `${tenths(miles)} mi`);
 const centsText = (rate) => `${tenths(rate * 100)}¢`;
 function mileagePosted(m) { const t = m.postedTransactionID ? get(m.postedTransactionID) : null; return t && !t.isVoid ? t : null; }
-/** Where the odometer was left before a drive on `date` (a stamp), in miles: the highest ending
+/** Where the odometer was left before a drive on `date` (a stamp), on the same trip (or, with no
+ *  trip, among drives on no trip), in miles: the highest ending
  *  reading on the latest day that has one, so drives entered out of order on the same day don't
  *  matter, while an older car under the same name (two rentals both called "Rental") doesn't win
  *  over a newer one. The same vehicle's when one is named, otherwise any vehicle's; never above
  *  `below` (the drive's own ending reading, when typed). 0 when there's none. Shown as a hint in
  *  Odometer start, never filled in. */
-function lastOdometer({ vehicle = '', date = 0, skipID = null, below = 0 } = {}) {
+function lastOdometer({ vehicle = '', date = 0, skipID = null, below = 0, tripID = null } = {}) {
   const v = vehicle.trim().toLowerCase();
   const end = (x) => Number(x.odometerEnd) || 0;
-  const rows = allMileage().filter((x) => end(x) > 0
+  // A drive on a trip only looks at that trip's drives (a rental is that trip's car); a drive on
+  // no trip (your own vehicle) only at other drives on no trip.
+  const sameTrip = (x) => (tripID ? sameId(x.tripID, tripID) : !x.tripID);
+  const rows = allMileage().filter((x) => end(x) > 0 && sameTrip(x)
     && !(skipID && sameId(x.id, skipID))
     && (!date || (x.date || 0) <= date)
     && (!below || end(x) <= below + 0.1)
@@ -708,7 +712,7 @@ function sheetDrive({ id = null, tripID = null } = {}) {
         <label class="toggle">My own vehicle (claimed at the IRS rate)<input type="checkbox" name="personalVehicle" ${m.personalVehicle !== false ? 'checked' : ''}></label>
         <label class="field"><span>Project</span><select name="projectID"><option value="">Company (no project)</option>${jobs.map((p) => `<option value="${esc(p.id)}" ${sameId(p.id, projectID) ? 'selected' : ''}>${esc(projectName(p))}</option>`).join('')}</select></label>
         <label class="field"><span>Trip</span><select name="tripID"><option value="">No trip</option>${trips.map((x) => `<option value="${esc(x.id)}" ${sameId(x.id, m.tripID) ? 'selected' : ''}>${esc(`${tripTitle(x)} · ${tripDates(x)}`)}</option>`).join('')}</select></label>
-        <div class="two"><label class="field"><span>Odometer start</span><input name="odometerStart" type="number" inputmode="decimal" step="1" min="0" value="${m.odometerStart ? Math.round(m.odometerStart * factor) : ''}" placeholder="${(() => { const o = lastOdometer({ vehicle: m.vehicle || '', date: m.date, skipID: existing?.id, below: Number(m.odometerEnd) || 0 }); return o ? Math.round(o * factor) : ''; })()}"></label><label class="field"><span>Odometer end</span><input name="odometerEnd" type="number" inputmode="decimal" step="1" min="0" value="${m.odometerEnd ? Math.round(m.odometerEnd * factor) : ''}"></label></div>
+        <div class="two"><label class="field"><span>Odometer start</span><input name="odometerStart" type="number" inputmode="decimal" step="1" min="0" value="${m.odometerStart ? Math.round(m.odometerStart * factor) : ''}" placeholder="${(() => { const o = lastOdometer({ vehicle: m.vehicle || '', date: m.date, skipID: existing?.id, below: Number(m.odometerEnd) || 0, tripID: m.tripID || null }); return o ? Math.round(o * factor) : ''; })()}"></label><label class="field"><span>Odometer end</span><input name="odometerEnd" type="number" inputmode="decimal" step="1" min="0" value="${m.odometerEnd ? Math.round(m.odometerEnd * factor) : ''}"></label></div>
       </div><div class="fs-foot">${posted ? `In the books as ${contributionFor(posted.id) ? 'your contribution' : 'owed to you'}; saving keeps it in step.` : 'Saved here first; post it to the books when you like.'}</div></div>
       ${posted && contributionAccount() ? `<div class="form-section"><div class="fs-head">In the books</div><div class="segmented">${[['owner', 'Company pays me back'], ['contribution', 'My contribution']].map(([k, l]) => `<button type="button" data-act="expense-personal" data-id="${esc(key(posted.id))}" data-as="${k}" class="${(contributionFor(posted.id) ? 'contribution' : 'owner') === k ? 'on' : ''}">${l}</button>`).join('')}</div></div>` : ''}
       ${existing && !posted && m.personalVehicle !== false ? `<div class="form-section"><div class="btn-row wrap"><button type="button" class="btn" data-act="drive-post" data-id="${esc(key(existing.id))}" data-as="owner">${icon('wallet')}Post: Pay Me Back</button>${contributionAccount() ? `<button type="button" class="btn" data-act="drive-post" data-id="${esc(key(existing.id))}" data-as="contribution">${icon('handCoin')}Post as My Contribution</button>` : ''}</div></div>` : ''}
@@ -719,9 +723,10 @@ function sheetDrive({ id = null, tripID = null } = {}) {
     const hintOdometer = () => {
       const d = parseInputDate(f.elements.date.value);
       const typedEnd = Number(f.elements.odometerEnd.value) || 0;
-      const o = lastOdometer({ vehicle: f.elements.vehicle.value, date: d ? toSec(localNoon(d)) : 0, skipID: existing?.id, below: typedEnd / factor });
+      const o = lastOdometer({ vehicle: f.elements.vehicle.value, date: d ? toSec(localNoon(d)) : 0, skipID: existing?.id, below: typedEnd / factor, tripID: f.elements.tripID.value || null });
       f.elements.odometerStart.placeholder = o ? String(Math.round(o * factor)) : '';
     };
+    f.elements.tripID.addEventListener('change', hintOdometer);
     f.elements.odometerEnd.addEventListener('input', hintOdometer);
     f.elements.vehicle.addEventListener('input', hintOdometer);
     f.elements.vehicle.addEventListener('change', hintOdometer);
