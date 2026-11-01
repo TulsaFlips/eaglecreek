@@ -383,7 +383,7 @@ function viewTrip(id) {
   const expenses = tripExpenses(t.id);
   html += card(`Expenses (${expenses.length})`, expenses.length ? expenses.map((x) => expenseRow(x)).join('') : '<div class="empty-line">Flights, hotels, rental cars, meals and fuel for this trip. Snap the receipt and it’s kept with the expense.</div>');
   const drives = tripMileage(t.id);
-  html += card(`Mileage (${drives.length})`, drives.length ? drives.map(driveRow).join('') : '<div class="empty-line">Driving to the airport, or around town while you’re there? Log each drive.</div>', { action: `<button class="btn link" data-act="drive-new" data-trip="${tid}">${icon('plus')}Drive</button>` });
+  html += card(`Mileage (${drives.length})`, drives.length ? drives.map(driveRow).join('') : '<div class="empty-line">Driving to the airport, or around town while you’re there? Log each drive.</div>', { action: `${drives.length > 1 ? `<button class="btn link" data-act="drive-reconcile" data-trip="${tid}">Reconcile Mileage</button>` : ''}<button class="btn link" data-act="drive-new" data-trip="${tid}">${icon('plus')}Drive</button>` });
   const proof = filesFor('recordID', t.id);
   html += card(`Proof of Travel (${proof.length})`, proof.length ? proof.map(fileRow).join('') : '<div class="empty-line">Boarding passes, itineraries, hotel folios, rental agreements, meeting notes.</div>', { action: `<button class="btn link" data-act="trip-proof" data-id="${tid}">${icon('plus')}Add</button>` });
   html += `<p class="note" style="margin:0 4px 14px">The Mac's Trips & Mileage makes the Trip Report for your accountant from all of this.</p>`;
@@ -1025,6 +1025,26 @@ Object.assign(ACTIONS, {
     if (!m) return;
     closeSheet();
     if (await postDrive(m, el.dataset.as)) { render(); toast(el.dataset.as === 'contribution' ? 'In the books as your contribution' : 'In the books as owed to you'); }
+  },
+  // Odometer readings on a trip chained from the first drive's start: each drive starts where
+  // the one before ended and ends start + its miles. The miles themselves don't change.
+  'drive-reconcile': async (el) => {
+    const drives = tripMileage(el.dataset.trip);
+    const first = drives.find((m) => Number(m.odometerStart) > 0);
+    if (!first) { toast('Give the first drive its starting odometer reading, then reconcile.'); return; }
+    if (!confirm(`Reconcile mileage?\n\nStarting from ${tenths(first.odometerStart)} on ${fmt.date(fromSec(first.date))}, each drive on this trip will start where the one before ended and end at start + its miles. The miles on each drive stay as they are.`)) return;
+    let odo = Number(first.odometerStart), n = 0, started = false;
+    for (const m of drives) {
+      if (!started) { if (!sameId(m.id, first.id)) continue; started = true; }
+      const start = Math.round(odo * 10) / 10, end = Math.round((odo + totalMiles(m)) * 10) / 10;
+      if (Math.abs((Number(m.odometerStart) || 0) - start) > 0.05 || Math.abs((Number(m.odometerEnd) || 0) - end) > 0.05) {
+        const y = clone(m); y.odometerStart = start; y.odometerEnd = end;
+        await saveRecord('mileage', y); n++;
+      }
+      odo = end;
+    }
+    render();
+    toast(n ? `${plural(n, 'drive')} brought into line` : 'Already in line');
   },
   'drive-post-all': async (el) => {
     const list = allMileage().filter((m) => m.personalVehicle !== false && !mileagePosted(m) && mileageAmount(m) > 0).reverse();
