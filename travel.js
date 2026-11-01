@@ -727,6 +727,8 @@ function sheetDrive({ id = null, tripID = null } = {}) {
       f.elements.odometerStart.placeholder = o ? String(Math.round(o * factor)) : '';
     };
     f.elements.tripID.addEventListener('change', hintOdometer);
+    f.elements.odometerEnd.addEventListener('input', (e) => { if (e.isTrusted) f.elements.odometerEnd.dataset.typed = f.elements.odometerEnd.value ? '1' : ''; });
+    if (existing && m.odometerEnd) f.elements.odometerEnd.dataset.typed = '1';
     f.elements.odometerEnd.addEventListener('input', hintOdometer);
     f.elements.vehicle.addEventListener('input', hintOdometer);
     f.elements.vehicle.addEventListener('change', hintOdometer);
@@ -737,6 +739,11 @@ function sheetDrive({ id = null, tripID = null } = {}) {
       if (!dist && a && b > a) { dist = b - a; }
       // Rounded to a tenth of a mile one way, as it's saved.
       const miles = (Math.round(dist / (unit === 'km' ? KM_PER_MILE : 1) * 10) / 10) * (f.elements.roundTrip.checked ? 2 : 1);
+      // Odometer end is filled in from Odometer start plus the distance (both ways on a round
+      // trip), until it's typed over; typing in it by hand leaves it alone from then on.
+      const typedDist = Number(f.elements.distance.value) || 0;
+      const endBox = f.elements.odometerEnd;
+      if (!endBox.dataset.typed) endBox.value = a && typedDist ? String(Math.round(a + typedDist * (f.elements.roundTrip.checked ? 2 : 1))) : '';
       const date = parseInputDate(f.elements.date.value) || new Date();
       const rate = mileageRate(toSec(localNoon(date)));
       $('#drive-note', f).textContent = f.elements.personalVehicle.checked
@@ -764,6 +771,7 @@ function readDriveForm(f, existing) {
   let dist = Number(v('distance')) || 0;
   if (!dist && a && b > a) dist = b - a;
   m.miles = Math.round(dist / per * 10) / 10;
+  if (!b && a && Number(v('distance')) > 0) m.odometerEnd = Math.round((m.odometerStart + m.miles * (m.roundTrip ? 2 : 1)) * 10) / 10;
   const d = parseInputDate(v('date'));
   if (d && !(existing && sameDay(d, fromSec(existing.date)))) m.date = toSec(localNoon(d));
   for (const k of ['projectID', 'tripID']) { if (v(k)) m[k] = v(k); else delete m[k]; }
