@@ -6,7 +6,7 @@
  */
 'use strict';
 
-const APP_VERSION = '1.23.1';
+const APP_VERSION = '1.23.2';
 // The record kinds kept on this device. QuickBooks, bank imports and the rest stay on the Mac.
 // planSheet and planMark are the plan reader's scales and measurements (plans.js); the Mac app
 // leaves kinds it doesn't know alone.
@@ -2389,6 +2389,10 @@ function viewSettings() {
     <button class="btn block danger" data-act="sign-out" style="margin-top:10px">${icon('logout')}Sign Out…</button>
   </div>`);
   html += `<p class="small muted" style="text-align:center;margin-top:6px">Eagle Creek for phone and iPad · ${APP_VERSION}</p>`;
+  try {
+    const log = JSON.parse(localStorage.getItem('ec-launches') || '[]');
+    if (log.length) html += `<details class="small muted" style="margin-top:8px"><summary>Recent launches</summary><pre style="white-space:pre-wrap;font-size:11px">${esc(log.map((e) => `${fmt.time(new Date(e.t))} ${e.what}${e.nav ? ` (${e.nav})` : ''}${e.v ? ` ${e.v}` : ''}${e.locked ? ' locked' : ''}${e.ms ? ` ${e.ms}ms` : ''}`).join('\n'))}</pre></details>`;
+  } catch { /* fine */ }
   return html;
 }
 
@@ -3320,6 +3324,14 @@ document.addEventListener('visibilitychange', async () => {
     if (LOCK.enabled() && LOCK.key) { LOCK.state.hiddenAt = Date.now(); LOCK.saveState(); }
   }
 });
+// The last few launches, for working out why the app reloaded (Settings, under the version).
+function launchLog(entry) {
+  try {
+    const log = JSON.parse(localStorage.getItem('ec-launches') || '[]');
+    log.push({ t: Date.now(), ...entry });
+    localStorage.setItem('ec-launches', JSON.stringify(log.slice(-8)));
+  } catch { /* fine */ }
+}
 function reloadForUpdate() {
   if (!S.updateReady) return false;
   const a = document.activeElement;
@@ -3327,6 +3339,7 @@ function reloadForUpdate() {
   const busy = LOCK.isLocked() || $('#sheet-root').children.length || (a && /INPUT|TEXTAREA|SELECT/.test(a.tagName)) || S.meta.uploads.length && S.syncing;
   if (busy) return false;
   flushLogSave();
+  launchLog({ what: 'reload for update' });
   setTimeout(() => location.reload(), 300);
   return true;
 }
@@ -3357,6 +3370,7 @@ async function boot() {
   }
   S.ui.lastDay = new Date();
   bump();
+  launchLog({ what: 'open', nav: performance.getEntriesByType?.('navigation')?.[0]?.type || '?', v: APP_VERSION, locked, controlled: !!navigator.serviceWorker?.controller });
   if ('serviceWorker' in navigator && location.protocol !== 'file:') {
     // A new version published to the site takes over when it's safe: not while you're typing,
     // in the middle of a form or at the lock screen, so nothing is lost.
@@ -3390,6 +3404,7 @@ async function boot() {
       await new Promise((r) => setTimeout(r, Math.max(0, 500 - (Date.now() - shown))));
       S.splash = false;
       document.body.classList.remove('splashing');
+      launchLog({ what: `splash ${why}`, ms: Date.now() - shown });
       if (why === 'update') { flushLogSave(); location.reload(); return; }
     }
   }
