@@ -186,7 +186,9 @@ function tripSummary(id) {
 // ----- Mileage (MileageMath)
 
 const KM_PER_MILE = 1.609344;
-const distanceUnit = () => prefs.get('distance-unit', 'km');
+// Miles unless km is picked on the Mileage page (remembered on this device). The key changed in
+// 1.19.2, when the default went from km to miles, so an old km setting doesn't carry over.
+const distanceUnit = () => prefs.get('distance-unit-2', 'mi');
 const IRS_RATES = [['2024-01-01', 0.67], ['2025-01-01', 0.70], ['2026-01-01', 0.725], ['2026-07-01', 0.76]];
 function mileageRate(sec) {
   const d = fromSec(sec);
@@ -402,7 +404,7 @@ function mileagePage() {
   const y = new Date().getFullYear();
   const thisYear = list.filter((m) => fromSec(m.date).getFullYear() === y);
   const unposted = list.filter((m) => m.personalVehicle !== false && !mileagePosted(m) && mileageAmount(m) > 0);
-  let html = `<div class="page-bar"><div class="segmented" style="width:150px">${[['km', 'km'], ['mi', 'Miles']].map(([k, l]) => `<button data-act="distance-unit" data-unit="${k}" class="${unit === k ? 'on' : ''}">${l}</button>`).join('')}</div>
+  let html = `<div class="page-bar"><div class="segmented" style="width:150px">${[['mi', 'Miles'], ['km', 'km']].map(([k, l]) => `<button data-act="distance-unit" data-unit="${k}" class="${unit === k ? 'on' : ''}">${l}</button>`).join('')}</div>
     <button class="btn primary sm" data-act="drive-new">${icon('plus')}Drive</button></div>`;
   if (!list.length) return html + emptyState('car', 'No Drives Yet', 'Log each business drive in your own vehicle: where, how far, and why. It’s claimed at the IRS rate per mile, and you choose whether the company pays you back or you keep it in as a contribution.');
   html += `<div class="tiles">
@@ -977,7 +979,7 @@ Object.assign(ACTIONS, {
     render();
     toast(`${plural(n, 'drive')} posted`);
   },
-  'distance-unit': (el) => { prefs.set('distance-unit', el.dataset.unit); render(); },
+  'distance-unit': (el) => { prefs.set('distance-unit-2', el.dataset.unit); render(); },
   'stay-new': () => sheetStay(null),
   'stay-open': (el) => sheetStay(el.dataset.id),
   'stay-delete': async (el) => {
