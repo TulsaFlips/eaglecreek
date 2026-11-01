@@ -159,7 +159,17 @@ const allTrips = () => all('trip').slice().sort((a, b) => ((b.startDate || 0) - 
 const allMileage = () => all('mileage').slice().sort((a, b) => ((b.date || 0) - (a.date || 0)) || ((b.updatedAt || 0) - (a.updatedAt || 0)));
 const mileageExpenseIDs = () => new Set(all('mileage').map((m) => key(m.postedTransactionID)).filter(Boolean));
 const tripExpenses = (id) => { const skip = mileageExpenseIDs(); return all('transaction').filter((t) => sameId(t.tripID, id) && !t.isVoid && t.type !== 'journal' && !skip.has(key(t.id))).sort((a, b) => (a.date || 0) - (b.date || 0)); };
-const tripMileage = (id) => all('mileage').filter((m) => sameId(m.tripID, id)).sort((a, b) => (a.date || 0) - (b.date || 0));
+// Drives as listed: oldest first, and within a day by odometer reading, smallest first (drives
+// with no reading after those with one, in the order saved).
+const driveOrder = (a, b) => {
+  const da = fromSec(a.date || 0), db = fromSec(b.date || 0);
+  if (!sameDay(da, db)) return (a.date || 0) - (b.date || 0);
+  const oa = Number(a.odometerStart) || Number(a.odometerEnd) || 0, ob = Number(b.odometerStart) || Number(b.odometerEnd) || 0;
+  if (oa && ob && oa !== ob) return oa - ob;
+  if (!!oa !== !!ob) return oa ? -1 : 1;
+  return (a.updatedAt || 0) - (b.updatedAt || 0);
+};
+const tripMileage = (id) => all('mileage').filter((m) => sameId(m.tripID, id)).sort(driveOrder);
 const receiptsFor = (txnID) => all('file').filter((f) => sameId(f.transactionID, txnID));
 
 /** A trip's costs (TripMath.summary): expenses with meals apart, mileage, what you paid yourself. */
@@ -435,7 +445,7 @@ function mileagePage() {
     ${tile('Not Posted Yet', fmt.money(unposted.reduce((s, m) => s + mileageAmount(m), 0)), plural(unposted.length, 'drive'), { accent: unposted.length ? 'var(--warning)' : 'var(--olive)' })}
   </div>`;
   if (unposted.length) html += `<div class="banner" style="--c:var(--slate)">${icon('car')}<div>${plural(unposted.length, 'drive')} ${unposted.length === 1 ? "isn't" : "aren't"} in the books yet. <div class="btn-row wrap" style="margin-top:8px"><button class="btn sm" data-act="drive-post-all" data-as="owner">${icon('wallet')}Post: Pay Me Back</button>${contributionAccount() ? `<button class="btn sm" data-act="drive-post-all" data-as="contribution">${icon('handCoin')}Post as My Contribution</button>` : ''}</div></div></div>`;
-  return html + `<section class="card flush">${list.slice(0, 200).map(driveRow).join('')}</section>`;
+  return html + `<section class="card flush">${list.slice(0, 200).sort(driveOrder).map(driveRow).join('')}</section>`;
 }
 
 // ----- Days in the US page
